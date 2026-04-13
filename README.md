@@ -1,4 +1,4 @@
-# CineAI — LLM-Augmented Hybrid Movie Recommender
+# LLM-Augmented Hybrid Movie Recommender
 
 **CSE 573: Semantic Web Mining · Group 18 · Spring 2026 · Arizona State University**
 
