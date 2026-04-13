@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Sparkles, X, SlidersHorizontal, Star, ChevronDown } from 'lucide-react';
+import { Search as SearchIcon, Sparkles, X, SlidersHorizontal, Star, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Movie, ModelType } from '../types';
 import { MOVIES, ALL_GENRES, EXAMPLE_QUERIES } from '../data/mockData';
@@ -132,7 +132,7 @@ export default function Search() {
         <div className="relative mb-4">
           <div className="flex items-center gap-3 px-5 py-4 bg-[#1a1a1a] border border-white/10 rounded-2xl
                           focus-within:border-white/30 focus-within:bg-[#1d1d1d] transition-all duration-200">
-            <Search size={20} className="text-[#666] shrink-0" />
+            <SearchIcon size={20} className="text-[#666] shrink-0" />
             <input
               ref={inputRef}
               value={query}
@@ -397,7 +397,7 @@ export default function Search() {
             className="mt-16 text-center"
           >
             <div className="w-16 h-16 rounded-2xl bg-[#1a1a1a] border border-white/10 flex items-center justify-center mx-auto mb-4">
-              <Search size={28} className="text-[#444]" />
+              <SearchIcon size={28} className="text-[#444]" />
             </div>
             <p className="text-[#888] text-lg font-medium mb-2">No results found</p>
             <p className="text-[#555] text-sm">Try adjusting your filters or searching with different terms</p>
