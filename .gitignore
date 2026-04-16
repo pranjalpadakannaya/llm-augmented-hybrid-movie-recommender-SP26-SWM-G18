@@ -6,6 +6,10 @@ __pycache__/
 frontend/node_modules/
 ml-20m/
 
+# Processed data (large, reproducible from raw)
+data/processed/
+*.parquet
+
 # C extensions
 *.so
 
