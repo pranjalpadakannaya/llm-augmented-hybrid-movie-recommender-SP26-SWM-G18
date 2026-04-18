@@ -280,7 +280,263 @@ toy_story = movies[movies["movieId"] == 1]
 print(toy_story[["movieId", "title", "year", "genres"]])
 # Expected: title="Toy Story", year=1995, genres=["Adventure", "Animation", ...]
 ```
+---
 
+# Recommendation Models
+
+This section describes how to run the three core recommendation models in the backend:
+
+- OCCF for long-term user preference modeling
+- GRU4Rec for session-based next-item recommendation
+- Knowledge Graph for semantic similarity recommendation
+
+---
+
+## Prerequisites
+
+- Python 3.10+
+- Preprocessing must be completed successfully
+- The following files should exist in `data/processed/`:
+  - `ratings.parquet`
+  - `sessions.parquet`
+  - `movies.parquet`
+- Optional for richer Knowledge Graph results:
+  - TMDB-enriched metadata file in `data/processed/` if available
+
+---
+
+## Setup
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+pip install implicit scipy pandas torch scikit-learn
+```
+
+---
+
+## 1. OCCF Model
+
+### What it does
+
+OCCF (One-Class Collaborative Filtering) learns long-term user preference from implicit feedback. It uses the processed ratings matrix and returns Top-N movie recommendations for a given user.
+
+### Input
+
+```
+data/processed/ratings.parquet
+```
+
+### Run
+
+```bash
+python models/occf.py
+```
+
+### Expected Output
+
+```
+Loading data...
+Data loaded. Matrix shape: (138493, 26744)
+Training OCCF model...
+Training complete.
+Sample recommendations for user 1:
+{'movieId': 1197, 'title': 'Princess Bride, The', 'score': 1.092614, 'model': 'OCCF'}
+{'movieId': 1206, 'title': 'Clockwork Orange, A', 'score': 0.949217, 'model': 'OCCF'}
+{'movieId': 2571, 'title': 'Matrix, The', 'score': 0.936054, 'model': 'OCCF'}
+...
+```
+
+### What to verify
+
+- The model loads `ratings.parquet` successfully
+- Training completes without errors
+- Output contains `movieId`, `title`, `score`, and `model`
+- Recommendations are returned as a ranked list
+- No duplicate movies appear in the list
+
+---
+
+## 2. GRU4Rec Model
+
+### What it does
+
+GRU4Rec learns short-term user intent from session sequences. It uses the session data built from timestamped interactions and predicts the next likely movie in the session.
+
+### Input
+
+```
+data/processed/sessions.parquet
+```
+
+### Run
+
+```bash
+python models/gru4rec.py
+```
+
+### Expected Output
+
+```
+Loading data...
+Data loaded. Train samples: 432780 | Val samples: 48086
+Items: 21352 | Device: cpu
+Training GRU4Rec model...
+Epoch 1/3 - loss: 8.2201
+Epoch 2/3 - loss: 7.6418
+Epoch 3/3 - loss: 7.3248
+Training complete.
+Sample recommendations for user 1:
+{'movieId': 1978, 'title': 'Friday the 13th Part V: A New Beginning', 'score': 3.003251, 'model': 'GRU4Rec'}
+{'movieId': 5541, 'title': 'Hot Shots!', 'score': 2.922863, 'model': 'GRU4Rec'}
+{'movieId': 1981, 'title': 'Friday the 13th Part VIII: Jason Takes Manhattan', 'score': 2.666821, 'model': 'GRU4Rec'}
+...
+```
+
+### What to verify
+
+- The model loads `sessions.parquet` successfully
+- Training loss decreases across epochs
+- Output contains `movieId`, `title`, `score`, and `model`
+- Recommendations are returned in a consistent format
+- No duplicate movies appear in the list
+
+---
+
+## 3. Knowledge Graph Model
+
+### What it does
+
+The Knowledge Graph model captures semantic similarity between movies using metadata such as genres, cast, directors, keywords, and related text features.
+
+It supports:
+- Movie-to-movie recommendation
+- History-based recommendation
+- Query-based recommendation
+
+### Input
+
+```
+data/processed/movies.parquet
+data/processed/movies.csv          # fallback
+```
+
+Optional: TMDB-enriched metadata file if available
+
+### Run
+
+```bash
+python models/kg.py
+```
+
+### Expected Output
+
+```
+Loading movies from /.../data/processed/movies.parquet ...
+Loading metadata ...
+Building knowledge graph ...
+Graph built: 27297 nodes  (27278 movies + 19 entities)
+Ready. 27278 movies indexed.
+
+── Recommendations for movieId=2571 ──
+  [0.3094] Matrix Revolutions, The
+          because: thriller, action, sci-fi
+  [0.2490] Matrix Reloaded, The
+          because: thriller, action, sci-fi
+  [0.1594] Replicant
+          because: thriller, action, sci-fi
+...
+
+── History-based recommendations ──
+  [0.4781] Money Train
+  [0.4781] Bad Boys
+  [0.4781] Strange Days
+...
+
+── Query: 'crime heist thriller' ──
+  [0.5879] Maiden Heist, The
+  [0.5692] Thriller: A Cruel Picture (Thriller - en grym film)
+  [0.4999] Crime Spree
+...
+
+── Explanation ──
+"Matrix, The" → "Pulp Fiction"  |  KG score: 0.0625  |  Shared: "thriller"
+```
+
+### What to verify
+
+- The model loads movie metadata successfully
+- The graph is built without errors
+- Recommendations are returned for a movie ID, a history list, and a text query
+- Output contains `movieId`, `title`, `score`, and `model`
+- The `because` field appears for movie/history recommendations
+- No duplicate movies appear in the list
+
+---
+
+## Model Output Format
+
+All models return the same structure for easy integration into the fusion layer:
+
+```json
+{
+  "movieId": 1197,
+  "title": "Princess Bride, The",
+  "score": 1.092614,
+  "model": "OCCF"
+}
+```
+
+The Knowledge Graph model also includes an explanation field:
+
+```json
+{
+  "movieId": 6934,
+  "title": "Matrix Revolutions, The",
+  "score": 0.586761,
+  "model": "KnowledgeGraph",
+  "because": ["thriller", "action", "sci-fi"]
+}
+```
+
+---
+
+## Validation Checklist
+
+### OCCF
+- [ ] Loads `ratings.parquet`
+- [ ] Trains ALS model
+- [ ] Prints a Top-N recommendation list
+
+### GRU4Rec
+- [ ] Loads `sessions.parquet`
+- [ ] Trains GRU model
+- [ ] Loss decreases across epochs
+- [ ] Prints a Top-N recommendation list
+
+### Knowledge Graph
+- [ ] Loads movie metadata
+- [ ] Builds graph
+- [ ] Produces semantic recommendations
+- [ ] Prints query and explanation outputs
+
+### All models
+- [ ] Output contains `movieId`, `title`, `score`, `model`
+- [ ] No duplicate movies in any Top-N list
+
+---
+
+## Notes
+
+| Model | Role |
+|---|---|
+| OCCF | Long-term taste |
+| GRU4Rec | Short-term session behavior |
+| Knowledge Graph | Semantic similarity |
+
+These three outputs are designed to feed into the final hybrid fusion layer.
 ---
 
 ## Frontend
