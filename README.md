@@ -25,6 +25,10 @@ Scores from all three branches are normalized and fused through a weighted re-ra
 ```
 .
 ├── backend/
+│   ├── models/
+│   │   ├── gru4rec.py       # session-based next-item recommendation (GRU)
+│   │   ├── kg.py            # semantic similarity via knowledge graph
+│   │   └── occf.py          # long-term preference via ALS (implicit feedback)
 │   ├── preprocessing/
 │   │   ├── __init__.py
 │   │   ├── config.py        # paths, split ratios, session gap constant
