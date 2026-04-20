@@ -78,13 +78,12 @@ class HybridRecommender:
         if abs(mx - mn) < 1e-9:
             return {int(r["movieId"]): 1.0 for r in recs}
 
-        return {
-            int(r["movieId"]): (float(r["score"]) - mn) / (mx - mn)
-            for r in recs
-        }
+        return {int(r["movieId"]): (float(r["score"]) - mn) / (mx - mn) for r in recs}
 
     @staticmethod
-    def _effective_weights(base_weights: Dict[str, float], active_models: List[str]) -> Dict[str, float]:
+    def _effective_weights(
+        base_weights: Dict[str, float], active_models: List[str]
+    ) -> Dict[str, float]:
         active = {k: v for k, v in base_weights.items() if k in active_models}
         total = sum(active.values())
         if total < 1e-9:
@@ -150,7 +149,9 @@ class HybridRecommender:
             if mid in kg_map:
                 r = kg_map[mid]
                 title = title or r.get("title")
-                final_score += weights.get("KnowledgeGraph", 0.0) * norm_kg.get(mid, 0.0)
+                final_score += weights.get("KnowledgeGraph", 0.0) * norm_kg.get(
+                    mid, 0.0
+                )
                 because = r.get("because", [])
                 sources.append(
                     {
@@ -214,10 +215,16 @@ if __name__ == "__main__":
 
     result = hybrid.recommend(user_id=1, N=10)
 
-    print(f"\nRecommendations for user {result['userId']} (history: {len(result['historyMovieIds'])} movies)\n")
+    print(
+        f"\nRecommendations for user {result['userId']} (history: {len(result['historyMovieIds'])} movies)\n"
+    )
 
     for rec in result["recommendations"]:
-        sources_str = ", ".join(f"{s['model']}={s['normalized']}" for s in rec["sources"])
-        because_str = f"  because: {', '.join(rec['because'])}" if rec.get("because") else ""
+        sources_str = ", ".join(
+            f"{s['model']}={s['normalized']}" for s in rec["sources"]
+        )
+        because_str = (
+            f"  because: {', '.join(rec['because'])}" if rec.get("because") else ""
+        )
         print(f"  [{rec['score']:.4f}] {rec['title']}")
         print(f"          sources: {sources_str}{because_str}")
