@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
-from tqdm import tqdm
+
 
 # Allow running as a script without installing the package
 sys.path.insert(0, str(Path(__file__).parent))

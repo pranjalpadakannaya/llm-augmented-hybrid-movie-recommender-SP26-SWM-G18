@@ -4,7 +4,7 @@ Each function accepts a raw DataFrame and returns a cleaned one.
 """
 
 import re
-import numpy as np
+
 import pandas as pd
 
 from .config import MIN_USER_RATINGS
