@@ -2,7 +2,6 @@
 Storage layer: write processed DataFrames to Parquet files and a SQLite database.
 """
 
-
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,15 +41,13 @@ def save_sqlite(
     cur = con.cursor()
 
     # --- movies ---
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE movies (
             movieId INTEGER PRIMARY KEY,
             title   TEXT NOT NULL,
             year    INTEGER
         )
-        """
-    )
+        """)
     cur.executemany(
         "INSERT INTO movies VALUES (?, ?, ?)",
         [
@@ -65,37 +62,29 @@ def save_sqlite(
         all_genres.update(g_list)
 
     cur.execute("CREATE TABLE genres (genre TEXT PRIMARY KEY)")
-    cur.executemany(
-        "INSERT INTO genres VALUES (?)", [(g,) for g in sorted(all_genres)]
-    )
+    cur.executemany("INSERT INTO genres VALUES (?)", [(g,) for g in sorted(all_genres)])
 
     # --- movie_genres (many-to-many) ---
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE movie_genres (
             movieId INTEGER NOT NULL,
             genre   TEXT    NOT NULL,
             PRIMARY KEY (movieId, genre)
         )
-        """
-    )
+        """)
     mg_rows = [
-        (int(r.movieId), g)
-        for r in movies_df.itertuples(index=False)
-        for g in r.genres
+        (int(r.movieId), g) for r in movies_df.itertuples(index=False) for g in r.genres
     ]
     cur.executemany("INSERT INTO movie_genres VALUES (?, ?)", mg_rows)
 
     # --- links ---
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE links (
             movieId INTEGER PRIMARY KEY,
             imdbId  INTEGER,
             tmdbId  INTEGER
         )
-        """
-    )
+        """)
     cur.executemany(
         "INSERT INTO links VALUES (?, ?, ?)",
         [
@@ -109,8 +98,7 @@ def save_sqlite(
     )
 
     # --- preprocessing_log ---
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE preprocessing_log (
             run_ts     TEXT,
             n_movies   INTEGER,
@@ -121,8 +109,7 @@ def save_sqlite(
             n_test     INTEGER,
             n_sessions INTEGER
         )
-        """
-    )
+        """)
     cur.execute(
         "INSERT INTO preprocessing_log VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (

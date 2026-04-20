@@ -8,7 +8,9 @@ from implicit.als import AlternatingLeastSquares
 
 
 class OCCFModel:
-    def __init__(self, factors: int = 50, regularization: float = 0.01, iterations: int = 10):
+    def __init__(
+        self, factors: int = 50, regularization: float = 0.01, iterations: int = 10
+    ):
         self.model = AlternatingLeastSquares(
             factors=factors,
             regularization=regularization,
@@ -40,10 +42,16 @@ class OCCFModel:
                 return path
         return None
 
-    def load_data(self, ratings_path: str | Path | None = None, movies_path: str | Path | None = None) -> None:
+    def load_data(
+        self,
+        ratings_path: str | Path | None = None,
+        movies_path: str | Path | None = None,
+    ) -> None:
         print("Loading data...")
 
-        ratings_path = Path(ratings_path) if ratings_path else self._default_ratings_path()
+        ratings_path = (
+            Path(ratings_path) if ratings_path else self._default_ratings_path()
+        )
         movies_path = Path(movies_path) if movies_path else self._default_movies_path()
 
         if not ratings_path.exists():
@@ -51,8 +59,14 @@ class OCCFModel:
 
         df = pd.read_parquet(ratings_path)
 
-        if "userId" not in df.columns or "movieId" not in df.columns or "rating" not in df.columns:
-            raise ValueError("ratings.parquet must contain userId, movieId, and rating columns")
+        if (
+            "userId" not in df.columns
+            or "movieId" not in df.columns
+            or "rating" not in df.columns
+        ):
+            raise ValueError(
+                "ratings.parquet must contain userId, movieId, and rating columns"
+            )
 
         # Implicit confidence weighting
         df = df.copy()

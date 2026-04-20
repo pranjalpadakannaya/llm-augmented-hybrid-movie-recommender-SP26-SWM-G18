@@ -19,7 +19,9 @@ class SessionDataset(Dataset):
 
     def __getitem__(self, idx: int):
         seq, target = self.samples[idx]
-        return torch.tensor(seq, dtype=torch.long), torch.tensor(target, dtype=torch.long)
+        return torch.tensor(seq, dtype=torch.long), torch.tensor(
+            target, dtype=torch.long
+        )
 
 
 def collate_batch(batch):
@@ -37,7 +39,13 @@ def collate_batch(batch):
 
 
 class GRU4RecNet(nn.Module):
-    def __init__(self, num_items: int, embed_dim: int = 64, hidden_dim: int = 128, dropout: float = 0.2):
+    def __init__(
+        self,
+        num_items: int,
+        embed_dim: int = 64,
+        hidden_dim: int = 128,
+        dropout: float = 0.2,
+    ):
         super().__init__()
         self.embedding = nn.Embedding(num_items, embed_dim, padding_idx=0)
         self.gru = nn.GRU(embed_dim, hidden_dim, batch_first=True)
@@ -147,7 +155,9 @@ class GRU4RecModel:
             gap = df.groupby("userId")["timestamp"].diff().fillna(0)
             new_session = (gap > self.gap_threshold_seconds).astype(int)
             df["session_id"] = new_session.groupby(df["userId"]).cumsum()
-            df["session_key"] = df["userId"].astype(str) + "_" + df["session_id"].astype(str)
+            df["session_key"] = (
+                df["userId"].astype(str) + "_" + df["session_id"].astype(str)
+            )
 
         df = df.sort_values(["userId", "session_key", "timestamp"])
         return df
@@ -200,10 +210,16 @@ class GRU4RecModel:
         self.train_samples = samples_sorted[:-val_size]
         self.val_samples = samples_sorted[-val_size:]
 
-    def load_data(self, sessions_path: str | Path | None = None, movies_path: str | Path | None = None):
+    def load_data(
+        self,
+        sessions_path: str | Path | None = None,
+        movies_path: str | Path | None = None,
+    ):
         print("Loading data...")
 
-        sessions_path = Path(sessions_path) if sessions_path else self._default_sessions_path()
+        sessions_path = (
+            Path(sessions_path) if sessions_path else self._default_sessions_path()
+        )
         movies_path = Path(movies_path) if movies_path else self._default_movies_path()
 
         if not sessions_path.exists():
@@ -227,7 +243,9 @@ class GRU4RecModel:
         ).to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
-        print(f"Data loaded. Train samples: {len(self.train_samples)} | Val samples: {len(self.val_samples)}")
+        print(
+            f"Data loaded. Train samples: {len(self.train_samples)} | Val samples: {len(self.val_samples)}"
+        )
         print(f"Items: {len(self.item2idx)} | Device: {self.device}")
 
     def train(self):
@@ -269,9 +287,13 @@ class GRU4RecModel:
         print("Training complete.")
 
     @torch.no_grad()
-    def recommend_from_history(self, history_movie_ids: List[int], N: int = 10) -> List[Dict]:
+    def recommend_from_history(
+        self, history_movie_ids: List[int], N: int = 10
+    ) -> List[Dict]:
         if self.model is None:
-            raise RuntimeError("Model is not trained. Call load_data() and train() first.")
+            raise RuntimeError(
+                "Model is not trained. Call load_data() and train() first."
+            )
 
         encoded = [self.item2idx[m] for m in history_movie_ids if m in self.item2idx]
         if len(encoded) == 0:

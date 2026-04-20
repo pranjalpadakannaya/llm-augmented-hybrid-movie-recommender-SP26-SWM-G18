@@ -41,7 +41,6 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 
-
 EDGE_WEIGHTS: Dict[str, float] = {
     "directed_by": 0.30,
     "has_genre": 0.25,
@@ -51,13 +50,14 @@ EDGE_WEIGHTS: Dict[str, float] = {
     "produced_by": 0.05,
 }
 
-TWO_HOP_DEPTH_PENALTY: float = 0.40   # multiplied onto two-hop path weights
-TFIDF_BLEND_WEIGHT: float = 0.15      # share of the final score from TF-IDF
+TWO_HOP_DEPTH_PENALTY: float = 0.40  # multiplied onto two-hop path weights
+TFIDF_BLEND_WEIGHT: float = 0.15  # share of the final score from TF-IDF
 
 
 @dataclass(slots=True)
 class Edge:
     """A directed, typed, weighted edge."""
+
     target: str
     edge_type: str
     weight: float
@@ -175,7 +175,11 @@ class KGRecommender:
 
     @staticmethod
     def _read_any(path: Path) -> pd.DataFrame:
-        return pd.read_parquet(path) if path.suffix.lower() == ".parquet" else pd.read_csv(path)
+        return (
+            pd.read_parquet(path)
+            if path.suffix.lower() == ".parquet"
+            else pd.read_csv(path)
+        )
 
     @staticmethod
     def _safe(value) -> str:
@@ -210,20 +214,24 @@ class KGRecommender:
 
     def _default_movies_path(self) -> Optional[Path]:
         root = self._repo_root()
-        return self._pick_existing([
-            root / "data" / "processed" / "movies.parquet",
-            root / "data" / "processed" / "movies.csv",
-            root / "ml-20m" / "movies.csv",
-        ])
+        return self._pick_existing(
+            [
+                root / "data" / "processed" / "movies.parquet",
+                root / "data" / "processed" / "movies.csv",
+                root / "ml-20m" / "movies.csv",
+            ]
+        )
 
     def _default_metadata_path(self) -> Optional[Path]:
         root = self._repo_root()
-        return self._pick_existing([
-            root / "data" / "processed" / "tmdb_metadata.parquet",
-            root / "data" / "processed" / "tmdb_metadata.csv",
-            root / "data" / "processed" / "movie_metadata.parquet",
-            root / "data" / "processed" / "movie_metadata.csv",
-        ])
+        return self._pick_existing(
+            [
+                root / "data" / "processed" / "tmdb_metadata.parquet",
+                root / "data" / "processed" / "tmdb_metadata.csv",
+                root / "data" / "processed" / "movie_metadata.parquet",
+                root / "data" / "processed" / "movie_metadata.csv",
+            ]
+        )
 
     def _build_graph(self, df: pd.DataFrame) -> None:
         """
@@ -249,7 +257,9 @@ class KGRecommender:
                 self.graph.add_node(gnode, label=tok)
                 self.graph.add_edge(mnode, gnode, "has_genre")
 
-            for tok in self._tokens(row.get("genre_names", "") or row.get("tmdb_genres", "")):
+            for tok in self._tokens(
+                row.get("genre_names", "") or row.get("tmdb_genres", "")
+            ):
                 gnode = f"genre:{self._slug(tok)}"
                 self.graph.add_node(gnode, label=tok)
                 self.graph.add_edge(mnode, gnode, "has_genre")
@@ -310,10 +320,14 @@ class KGRecommender:
         metadata_path: Optional[str | Path] = None,
     ) -> None:
         movies_path = Path(movies_path) if movies_path else self._default_movies_path()
-        metadata_path = Path(metadata_path) if metadata_path else self._default_metadata_path()
+        metadata_path = (
+            Path(metadata_path) if metadata_path else self._default_metadata_path()
+        )
 
         if movies_path is None or not movies_path.exists():
-            raise FileNotFoundError("Cannot find a movies file. Pass movies_path explicitly.")
+            raise FileNotFoundError(
+                "Cannot find a movies file. Pass movies_path explicitly."
+            )
 
         print(f"Loading movies from {movies_path} …")
         df = self._read_any(movies_path)
@@ -366,8 +380,7 @@ class KGRecommender:
             self._index_movie[idx] = mid
 
         self._movie_titles = {
-            int(mid): str(title)
-            for mid, title in zip(df["movieId"], df["title"])
+            int(mid): str(title) for mid, title in zip(df["movieId"], df["title"])
         }
 
         self._build_graph(df)
@@ -437,7 +450,7 @@ class KGRecommender:
         top_indices = np.argpartition(
             -sims,
             kth=min(self.candidate_pool, len(sims)) - 1,
-        )[:self.candidate_pool]
+        )[: self.candidate_pool]
 
         return [
             self._index_movie[int(i)]
@@ -568,13 +581,15 @@ class KGRecommender:
                 else 0.0
             )
             final = (1.0 - self.tfidf_blend) * score + self.tfidf_blend * tf_s
-            results.append({
-                "movieId": cid,
-                "title": self._movie_titles.get(cid, f"Movie {cid}"),
-                "score": round(final, 6),
-                "kg_score": round(score, 6),
-                "because": sorted(reasons, key=reasons.count, reverse=True)[:5],
-            })
+            results.append(
+                {
+                    "movieId": cid,
+                    "title": self._movie_titles.get(cid, f"Movie {cid}"),
+                    "score": round(final, 6),
+                    "kg_score": round(score, 6),
+                    "because": sorted(reasons, key=reasons.count, reverse=True)[:5],
+                }
+            )
 
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:N]
@@ -618,12 +633,14 @@ class KGRecommender:
             tf_s = float(sims[int(idx)])
             boost = entity_boost.get(mid, 0.0)
             final = tf_s + boost
-            results.append({
-                "movieId": mid,
-                "title": self._movie_titles.get(mid, f"Movie {mid}"),
-                "score": round(final, 6),
-                "model": self.model_name,
-            })
+            results.append(
+                {
+                    "movieId": mid,
+                    "title": self._movie_titles.get(mid, f"Movie {mid}"),
+                    "score": round(final, 6),
+                    "model": self.model_name,
+                }
+            )
 
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:N]

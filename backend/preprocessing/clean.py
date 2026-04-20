@@ -32,9 +32,11 @@ def clean_movies(df: pd.DataFrame) -> pd.DataFrame:
 
     # Split pipe-separated genres into a Python list
     df["genres"] = df["genres"].apply(
-        lambda g: []
-        if pd.isna(g) or g.strip() == "(no genres listed)"
-        else [x.strip() for x in g.split("|") if x.strip()]
+        lambda g: (
+            []
+            if pd.isna(g) or g.strip() == "(no genres listed)"
+            else [x.strip() for x in g.split("|") if x.strip()]
+        )
     )
 
     df["movieId"] = df["movieId"].astype("int32")
