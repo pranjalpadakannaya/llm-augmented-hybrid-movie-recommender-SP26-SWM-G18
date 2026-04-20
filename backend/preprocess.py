@@ -14,7 +14,6 @@ import time
 from pathlib import Path
 
 import pandas as pd
-from tqdm import tqdm
 
 # Allow running as a script without installing the package
 sys.path.insert(0, str(Path(__file__).parent))
@@ -110,8 +109,10 @@ def main() -> None:
     genome = clean_genome_scores(genome_raw, valid_movie_ids)
 
     tmdb_coverage = links["tmdbId"].notna().sum()
-    print(f"  links  : {len(links_raw):,} → {len(links):,}  "
-          f"(tmdbId coverage: {tmdb_coverage/len(links)*100:.1f}%)")
+    print(
+        f"  links  : {len(links_raw):,} → {len(links):,}  "
+        f"(tmdbId coverage: {tmdb_coverage/len(links)*100:.1f}%)"
+    )
     print(f"  tags   : {len(tags_raw):,} → {len(tags):,}")
     print(f"  genome : {len(genome_raw):,} → {len(genome):,}")
     del links_raw, tags_raw, genome_raw

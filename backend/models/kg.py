@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Knowledge Graph Movie Recommender
 ==================================
@@ -30,9 +28,11 @@ that adds a small signal for textual matches the graph doesn't
 capture (e.g. thematic overlap with no shared cast/crew).
 """
 
+from __future__ import annotations
+
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -41,28 +41,24 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 
-
-
-
 EDGE_WEIGHTS: Dict[str, float] = {
-    "directed_by":  0.30,
-    "has_genre":    0.25,
-    "acted_in":     0.20,
-    "written_by":   0.15,
-    "tagged_with":  0.10,
-    "produced_by":  0.05,
+    "directed_by": 0.30,
+    "has_genre": 0.25,
+    "acted_in": 0.20,
+    "written_by": 0.15,
+    "tagged_with": 0.10,
+    "produced_by": 0.05,
 }
 
-TWO_HOP_DEPTH_PENALTY: float = 0.40   # multiplied onto two-hop path weights
-TFIDF_BLEND_WEIGHT:    float = 0.15   # share of the final score from TF-IDF
-
-
+TWO_HOP_DEPTH_PENALTY: float = 0.40  # multiplied onto two-hop path weights
+TFIDF_BLEND_WEIGHT: float = 0.15  # share of the final score from TF-IDF
 
 
 @dataclass(slots=True)
 class Edge:
     """A directed, typed, weighted edge."""
-    target: str          # node id of the other end
+
+    target: str
     edge_type: str
     weight: float
 
@@ -80,14 +76,9 @@ class KnowledgeGraph:
     """
 
     def __init__(self) -> None:
-        # adjacency list: node_id → list[Edge]
         self._adj: Dict[str, List[Edge]] = defaultdict(list)
-        # quick membership check
         self._nodes: Set[str] = set()
-        # human-readable label per node
         self._labels: Dict[str, str] = {}
-
-
 
     def add_node(self, node_id: str, label: str = "") -> None:
         self._nodes.add(node_id)
@@ -108,8 +99,6 @@ class KnowledgeGraph:
         self._adj[src].append(Edge(dst, edge_type, w))
         self._adj[dst].append(Edge(src, edge_type, w))
 
-
-
     def neighbors(
         self,
         node_id: str,
@@ -122,21 +111,25 @@ class KnowledgeGraph:
 
     def entity_neighbors(self, movie_node: str) -> Dict[str, float]:
         """Return {entity_node: edge_weight} for a movie node."""
-        return {e.target: e.weight for e in self._adj.get(movie_node, [])
-                if not e.target.startswith("movie:")}
+        return {
+            e.target: e.weight
+            for e in self._adj.get(movie_node, [])
+            if not e.target.startswith("movie:")
+        }
 
     def movie_neighbors(self, entity_node: str) -> Dict[str, float]:
         """Return {movie_node: edge_weight} for an entity node."""
-        return {e.target: e.weight for e in self._adj.get(entity_node, [])
-                if e.target.startswith("movie:")}
+        return {
+            e.target: e.weight
+            for e in self._adj.get(entity_node, [])
+            if e.target.startswith("movie:")
+        }
 
     def __len__(self) -> int:
         return len(self._nodes)
 
     def label(self, node_id: str) -> str:
         return self._labels.get(node_id, node_id)
-
-
 
 
 class KGRecommender:
@@ -159,15 +152,14 @@ class KGRecommender:
         candidate_pool: int = 500,
         max_tfidf_features: int = 15_000,
     ) -> None:
-        self.edge_weights    = edge_weights
+        self.edge_weights = edge_weights
         self.two_hop_penalty = two_hop_penalty
-        self.tfidf_blend     = tfidf_blend
-        self.candidate_pool  = candidate_pool
+        self.tfidf_blend = tfidf_blend
+        self.candidate_pool = candidate_pool
         self.max_tfidf_features = max_tfidf_features
 
         self.graph: KnowledgeGraph = KnowledgeGraph()
 
-        # movie_id (int) → DataFrame row index
         self._movie_index: Dict[int, int] = {}
         self._index_movie: Dict[int, int] = {}
         self._movie_titles: Dict[int, str] = {}
@@ -177,16 +169,17 @@ class KGRecommender:
         self._tfidf_matrix = None
         self.model_name = "KnowledgeGraph"
 
-
-
     @staticmethod
     def _repo_root() -> Path:
         return Path(__file__).resolve().parents[2]
 
     @staticmethod
     def _read_any(path: Path) -> pd.DataFrame:
-        return pd.read_parquet(path) if path.suffix.lower() == ".parquet" \
-               else pd.read_csv(path)
+        return (
+            pd.read_parquet(path)
+            if path.suffix.lower() == ".parquet"
+            else pd.read_csv(path)
+        )
 
     @staticmethod
     def _safe(value) -> str:
@@ -221,21 +214,24 @@ class KGRecommender:
 
     def _default_movies_path(self) -> Optional[Path]:
         root = self._repo_root()
-        return self._pick_existing([
-            root / "data" / "processed" / "movies.parquet",
-            root / "data" / "processed" / "movies.csv",
-            root / "ml-20m" / "movies.csv",
-        ])
+        return self._pick_existing(
+            [
+                root / "data" / "processed" / "movies.parquet",
+                root / "data" / "processed" / "movies.csv",
+                root / "ml-20m" / "movies.csv",
+            ]
+        )
 
     def _default_metadata_path(self) -> Optional[Path]:
         root = self._repo_root()
-        return self._pick_existing([
-            root / "data" / "processed" / "tmdb_metadata.parquet",
-            root / "data" / "processed" / "tmdb_metadata.csv",
-            root / "data" / "processed" / "movie_metadata.parquet",
-            root / "data" / "processed" / "movie_metadata.csv",
-        ])
-
+        return self._pick_existing(
+            [
+                root / "data" / "processed" / "tmdb_metadata.parquet",
+                root / "data" / "processed" / "tmdb_metadata.csv",
+                root / "data" / "processed" / "movie_metadata.parquet",
+                root / "data" / "processed" / "movie_metadata.csv",
+            ]
+        )
 
     def _build_graph(self, df: pd.DataFrame) -> None:
         """
@@ -251,30 +247,28 @@ class KGRecommender:
         print("Building knowledge graph …")
 
         for _, row in df.iterrows():
-            mid    = int(row["movieId"])
-            title  = self._safe(row.get("title", ""))
-            mnode  = f"movie:{mid}"
+            mid = int(row["movieId"])
+            title = self._safe(row.get("title", ""))
+            mnode = f"movie:{mid}"
             self.graph.add_node(mnode, label=title)
 
-            # --- genres -------------------------------------------------
             for tok in self._tokens(row.get("genres", "")):
                 gnode = f"genre:{self._slug(tok)}"
                 self.graph.add_node(gnode, label=tok)
                 self.graph.add_edge(mnode, gnode, "has_genre")
 
-            for tok in self._tokens(row.get("genre_names", "") or
-                                     row.get("tmdb_genres", "")):
+            for tok in self._tokens(
+                row.get("genre_names", "") or row.get("tmdb_genres", "")
+            ):
                 gnode = f"genre:{self._slug(tok)}"
                 self.graph.add_node(gnode, label=tok)
                 self.graph.add_edge(mnode, gnode, "has_genre")
 
-            # --- cast ---------------------------------------------------
             for tok in self._tokens(row.get("cast", "")):
                 pnode = f"person:{self._slug(tok)}"
                 self.graph.add_node(pnode, label=tok)
                 self.graph.add_edge(mnode, pnode, "acted_in")
 
-            # --- director / crew ----------------------------------------
             for col in ("director", "crew"):
                 for tok in self._tokens(row.get(col, "")):
                     pnode = f"person:{self._slug(tok)}"
@@ -282,38 +276,33 @@ class KGRecommender:
                     edge_type = "directed_by" if col == "director" else "written_by"
                     self.graph.add_edge(mnode, pnode, edge_type)
 
-            # --- keywords / tags ----------------------------------------
             for col in ("keywords", "tags"):
                 for tok in self._tokens(row.get(col, "")):
                     knode = f"keyword:{self._slug(tok)}"
                     self.graph.add_node(knode, label=tok)
                     self.graph.add_edge(mnode, knode, "tagged_with")
 
-            # --- studio / production company ----------------------------
             for tok in self._tokens(row.get("production_companies", "")):
                 snode = f"studio:{self._slug(tok)}"
                 self.graph.add_node(snode, label=tok)
                 self.graph.add_edge(mnode, snode, "produced_by")
 
-        node_count  = len(self.graph)
-        movie_count = len([n for n in self.graph._nodes
-                           if n.startswith("movie:")])
-        print(f"Graph built: {node_count} nodes  "
-              f"({movie_count} movies + {node_count - movie_count} entities)")
-
-    # ------------------------------------------------------------------
-    # TF-IDF fallback
-    # ------------------------------------------------------------------
+        node_count = len(self.graph)
+        movie_count = len([n for n in self.graph._nodes if n.startswith("movie:")])
+        print(
+            f"Graph built: {node_count} nodes  "
+            f"({movie_count} movies + {node_count - movie_count} entities)"
+        )
 
     def _build_tfidf(self, df: pd.DataFrame) -> None:
         """Build a lightweight TF-IDF index as a semantic fallback."""
         docs = []
         for _, row in df.iterrows():
             parts = [
-                self._safe(row.get("title",    "")) * 3,  # weight by repetition
+                self._safe(row.get("title", "")) * 3,
                 self._safe(row.get("overview", "")),
                 self._safe(row.get("keywords", "")),
-                self._safe(row.get("tags",     "")),
+                self._safe(row.get("tags", "")),
             ]
             docs.append(" ".join(p for p in parts if p))
 
@@ -323,23 +312,22 @@ class KGRecommender:
             ngram_range=(1, 2),
             max_features=self.max_tfidf_features,
         )
-        self._tfidf_matrix = self._vectorizer.fit_transform(
-            df["__doc__"].fillna("")
-        )
-
-
+        self._tfidf_matrix = self._vectorizer.fit_transform(df["__doc__"].fillna(""))
 
     def load_data(
         self,
-        movies_path:   Optional[str | Path] = None,
+        movies_path: Optional[str | Path] = None,
         metadata_path: Optional[str | Path] = None,
     ) -> None:
-        movies_path   = Path(movies_path)   if movies_path   else self._default_movies_path()
-        metadata_path = Path(metadata_path) if metadata_path else self._default_metadata_path()
+        movies_path = Path(movies_path) if movies_path else self._default_movies_path()
+        metadata_path = (
+            Path(metadata_path) if metadata_path else self._default_metadata_path()
+        )
 
         if movies_path is None or not movies_path.exists():
-            raise FileNotFoundError("Cannot find a movies file. "
-                                    "Pass movies_path explicitly.")
+            raise FileNotFoundError(
+                "Cannot find a movies file. Pass movies_path explicitly."
+            )
 
         print(f"Loading movies from {movies_path} …")
         df = self._read_any(movies_path)
@@ -362,37 +350,42 @@ class KGRecommender:
                 "    model.load_data(metadata_path='data/processed/tmdb_metadata.parquet')"
             )
 
-        rich_cols = [c for c in ("cast", "director", "keywords", "overview",
-                                 "production_companies", "tags") if c in df.columns]
-        print(f"Columns available for graph: "
-              f"{list(df.columns[:8])} … ({len(df.columns)} total)")
+        print(
+            f"Columns available for graph: "
+            f"{list(df.columns[:8])} … ({len(df.columns)} total)"
+        )
 
-        # Fill missing optional columns
-        for col in ("title", "genres", "overview", "keywords", "cast", "crew",
-                    "director", "genre_names", "tags", "tmdb_genres",
-                    "production_companies"):
+        for col in (
+            "title",
+            "genres",
+            "overview",
+            "keywords",
+            "cast",
+            "crew",
+            "director",
+            "genre_names",
+            "tags",
+            "tmdb_genres",
+            "production_companies",
+        ):
             if col not in df.columns:
                 df[col] = ""
 
         df = df.reset_index(drop=True)
         self._movies_df = df
 
-        # Index maps
         for idx, movie_id in enumerate(df["movieId"].tolist()):
             mid = int(movie_id)
             self._movie_index[mid] = idx
             self._index_movie[idx] = mid
 
         self._movie_titles = {
-            int(mid): str(title)
-            for mid, title in zip(df["movieId"], df["title"])
+            int(mid): str(title) for mid, title in zip(df["movieId"], df["title"])
         }
 
         self._build_graph(df)
         self._build_tfidf(df)
         print(f"Ready. {len(self._movie_index)} movies indexed.")
-
-
 
     def _kg_score(
         self,
@@ -415,28 +408,25 @@ class KGRecommender:
         c_entities: Dict[str, float] = self.graph.entity_neighbors(cnode)
 
         shared = set(q_entities) & set(c_entities)
-        score  = 0.0
+        score = 0.0
         reasons: List[str] = []
 
-        # 1-hop: direct shared entities
         for entity in shared:
             contribution = q_entities[entity] * c_entities[entity]
             score += contribution
             reasons.append(self.graph.label(entity))
 
-        # 2-hop: q → e1 → e2 → c   (entity-to-entity bridge)
         for e1, w_qe1 in q_entities.items():
             for e2_edge in self.graph.neighbors(e1):
                 e2 = e2_edge.target
                 if e2.startswith("movie:") or e2 in q_entities:
-                    continue   # skip movie nodes and already-counted entities
+                    continue
                 w_c = c_entities.get(e2, 0.0)
                 if w_c > 0:
-                    contribution = (w_qe1 * e2_edge.weight * w_c
-                                    * self.two_hop_penalty)
+                    contribution = w_qe1 * e2_edge.weight * w_c * self.two_hop_penalty
                     score += contribution
 
-        return score, reasons[:5]  # cap explanation list
+        return score, reasons[:5]
 
     def _tfidf_score(self, idx_q: int, idx_c: int) -> float:
         if self._tfidf_matrix is None:
@@ -451,15 +441,17 @@ class KGRecommender:
         exclude_ids: Set[int],
     ) -> List[int]:
         """Return the top candidate movie_ids by TF-IDF for an initial pool."""
-        # sparse .mean(axis=0) returns np.matrix; linear_kernel requires ndarray
-        if hasattr(query_vec, "A"):          # np.matrix → ndarray
+        if hasattr(query_vec, "A"):
             query_vec = query_vec.A
-        elif hasattr(query_vec, "toarray"): # sparse row → dense
+        elif hasattr(query_vec, "toarray"):
             query_vec = query_vec.toarray()
+
         sims = linear_kernel(query_vec, self._tfidf_matrix).flatten()
-        top_indices = np.argpartition(-sims,
-                                      kth=min(self.candidate_pool, len(sims)) - 1
-                                      )[:self.candidate_pool]
+        top_indices = np.argpartition(
+            -sims,
+            kth=min(self.candidate_pool, len(sims)) - 1,
+        )[: self.candidate_pool]
+
         return [
             self._index_movie[int(i)]
             for i in top_indices
@@ -473,16 +465,14 @@ class KGRecommender:
         tfidf_score: float,
         reasons: List[str],
     ) -> Dict:
-        final = (1.0 - self.tfidf_blend) * kg_score + \
-                self.tfidf_blend * tfidf_score
+        final = (1.0 - self.tfidf_blend) * kg_score + self.tfidf_blend * tfidf_score
         return {
-            "movieId":  movie_id,
-            "title":    self._movie_titles.get(movie_id, f"Movie {movie_id}"),
-            "score":    round(final, 6),
+            "movieId": movie_id,
+            "title": self._movie_titles.get(movie_id, f"Movie {movie_id}"),
+            "score": round(final, 6),
             "kg_score": round(kg_score, 6),
-            "because":  reasons,
+            "because": reasons,
         }
-
 
     def _require_loaded(self) -> None:
         if self._movies_df is None:
@@ -504,11 +494,10 @@ class KGRecommender:
         if movie_id not in self._movie_index:
             raise KeyError(f"movie_id {movie_id} not found in graph.")
 
-        idx_q    = self._movie_index[movie_id]
-        qnode    = f"movie:{movie_id}"
-        q_vec    = self._tfidf_matrix[idx_q]
+        idx_q = self._movie_index[movie_id]
+        qnode = f"movie:{movie_id}"
+        q_vec = self._tfidf_matrix[idx_q]
 
-        # Candidate pool: 1-hop movie neighbors + TF-IDF top-k
         kg_candidates: Set[int] = set()
         for entity_edge in self.graph.neighbors(qnode):
             entity = entity_edge.target
@@ -518,7 +507,7 @@ class KGRecommender:
         kg_candidates.discard(movie_id)
 
         tfidf_candidates = set(self._tfidf_top_candidates(q_vec, {movie_id}))
-        all_candidates   = kg_candidates | tfidf_candidates
+        all_candidates = kg_candidates | tfidf_candidates
 
         results = []
         for cid in all_candidates:
@@ -526,7 +515,7 @@ class KGRecommender:
                 continue
             kg_s, reasons = self._kg_score(movie_id, cid)
             idx_c = self._movie_index.get(cid)
-            tf_s  = self._tfidf_score(idx_q, idx_c) if idx_c is not None else 0.0
+            tf_s = self._tfidf_score(idx_q, idx_c) if idx_c is not None else 0.0
             results.append(self._build_result(cid, kg_s, tf_s, reasons))
 
         results.sort(key=lambda x: x["score"], reverse=True)
@@ -546,14 +535,12 @@ class KGRecommender:
         """
         self._require_loaded()
 
-        valid_ids = [mid for mid in history_movie_ids
-                     if mid in self._movie_index]
+        valid_ids = [mid for mid in history_movie_ids if mid in self._movie_index]
         if not valid_ids:
             return []
 
         seen = set(valid_ids)
 
-        # Aggregate entity weight profile across history
         entity_profile: Dict[str, float] = defaultdict(float)
         for i, mid in enumerate(valid_ids):
             recency = 1.5 if i == len(valid_ids) - 1 else 1.0
@@ -562,7 +549,6 @@ class KGRecommender:
                 if not e_edge.target.startswith("movie:"):
                     entity_profile[e_edge.target] += e_edge.weight * recency
 
-        # Collect candidate movies reachable from the entity profile
         candidates: Set[int] = set()
         for entity in entity_profile:
             for m_edge in self.graph.neighbors(entity):
@@ -571,18 +557,15 @@ class KGRecommender:
                     if cid not in seen:
                         candidates.add(cid)
 
-        # TF-IDF blend using mean query vector of history
-        # sparse .mean(axis=0) returns np.matrix — convert to plain ndarray
         history_indices = [self._movie_index[mid] for mid in valid_ids]
         q_vec = np.asarray(self._tfidf_matrix[history_indices].mean(axis=0))
         tfidf_candidates = set(self._tfidf_top_candidates(q_vec, seen))
-        all_candidates   = candidates | tfidf_candidates
+        all_candidates = candidates | tfidf_candidates
 
-        # Score each candidate against the accumulated entity profile
         results = []
         for cid in all_candidates:
             cnode = f"movie:{cid}"
-            score  = 0.0
+            score = 0.0
             reasons: List[str] = []
             for e_edge in self.graph.neighbors(cnode):
                 entity = e_edge.target
@@ -591,17 +574,22 @@ class KGRecommender:
                     score += contribution
                     reasons.append(self.graph.label(entity))
 
-            idx_c  = self._movie_index.get(cid)
-            tf_s   = float(linear_kernel(q_vec, self._tfidf_matrix[idx_c]).flatten()[0]) \
-                     if idx_c is not None else 0.0
-            final  = (1.0 - self.tfidf_blend) * score + self.tfidf_blend * tf_s
-            results.append({
-                "movieId":  cid,
-                "title":    self._movie_titles.get(cid, f"Movie {cid}"),
-                "score":    round(final, 6),
-                "kg_score": round(score, 6),
-                "because":  sorted(reasons, key=reasons.count, reverse=True)[:5],
-            })
+            idx_c = self._movie_index.get(cid)
+            tf_s = (
+                float(linear_kernel(q_vec, self._tfidf_matrix[idx_c]).flatten()[0])
+                if idx_c is not None
+                else 0.0
+            )
+            final = (1.0 - self.tfidf_blend) * score + self.tfidf_blend * tf_s
+            results.append(
+                {
+                    "movieId": cid,
+                    "title": self._movie_titles.get(cid, f"Movie {cid}"),
+                    "score": round(final, 6),
+                    "kg_score": round(score, 6),
+                    "because": sorted(reasons, key=reasons.count, reverse=True)[:5],
+                }
+            )
 
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:N]
@@ -625,12 +613,10 @@ class KGRecommender:
         sims = linear_kernel(qvec, self._tfidf_matrix).flatten()
 
         pool_size = min(self.candidate_pool, len(sims))
-        top_idx   = np.argpartition(-sims, kth=pool_size - 1)[:pool_size]
+        top_idx = np.argpartition(-sims, kth=pool_size - 1)[:pool_size]
 
-        # Entity boost: tokens in the query that match entity node slugs
-        query_tokens  = set(self._slug(t) for t in query.lower().split()
-                            if len(t) > 2)
-        entity_boost:  Dict[int, float] = defaultdict(float)
+        query_tokens = set(self._slug(t) for t in query.lower().split() if len(t) > 2)
+        entity_boost: Dict[int, float] = defaultdict(float)
         for node_id in self.graph._nodes:
             if node_id.startswith("movie:"):
                 continue
@@ -643,20 +629,21 @@ class KGRecommender:
 
         results = []
         for idx in top_idx:
-            mid    = self._index_movie[int(idx)]
-            tf_s   = float(sims[int(idx)])
-            boost  = entity_boost.get(mid, 0.0)
-            final  = tf_s + boost
-            results.append({
-                "movieId": mid,
-                "title":   self._movie_titles.get(mid, f"Movie {mid}"),
-                "score":   round(final, 6),
-                "model":   self.model_name,
-            })
+            mid = self._index_movie[int(idx)]
+            tf_s = float(sims[int(idx)])
+            boost = entity_boost.get(mid, 0.0)
+            final = tf_s + boost
+            results.append(
+                {
+                    "movieId": mid,
+                    "title": self._movie_titles.get(mid, f"Movie {mid}"),
+                    "score": round(final, 6),
+                    "model": self.model_name,
+                }
+            )
 
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:N]
-
 
     def explain(self, movie_id_a: int, movie_id_b: int) -> str:
         """
@@ -676,10 +663,6 @@ class KGRecommender:
             f"Shared: {shared}"
         )
 
-
-# ---------------------------------------------------------------------------
-# CLI smoke-test
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     model = KGRecommender(
