@@ -9,7 +9,7 @@ on:
       - "**"
 
 jobs:
-  checks:
+  backend:
     runs-on: ubuntu-latest
 
     steps:
@@ -35,3 +35,30 @@ jobs:
 
       - name: Tests
         run: pytest backend
+
+  frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install frontend packages
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Lint frontend
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
