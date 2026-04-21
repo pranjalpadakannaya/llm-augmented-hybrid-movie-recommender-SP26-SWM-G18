@@ -1,8 +1,24 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Bell, ChevronDown, Film, User, Layers, LogOut } from 'lucide-react';
+import { Search, Bell, ChevronDown, User, Layers, LogOut } from 'lucide-react';
 import { useScrolled } from '../hooks/useScrolled';
+
+function PopcornIcon({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none">
+      <path d="M8 14L10 25H18L20 14Z" fill="#E50914" />
+      <path d="M10.5 14L11.2 25H12.5L11.8 14Z" fill="rgba(255,255,255,0.28)" />
+      <path d="M14.8 14L15.5 25H16.8L16.1 14Z" fill="rgba(255,255,255,0.28)" />
+      <rect x="7" y="12" width="14" height="2.5" rx="1.25" fill="#bf0010" />
+      <circle cx="11" cy="9.5" r="3" fill="#FFF176" />
+      <circle cx="14" cy="7.8" r="3.2" fill="#FFF9C4" />
+      <circle cx="17" cy="9.5" r="3" fill="#FFF176" />
+      <circle cx="8.5" cy="11.2" r="2" fill="#FFF9C4" />
+      <circle cx="19.5" cy="11.2" r="2" fill="#FFF176" />
+    </svg>
+  );
+}
 
 const NAV_LINKS = [
   { label: 'Home', path: '/' },
@@ -28,11 +44,9 @@ export default function Navbar() {
       <div className="max-w-screen-2xl mx-auto px-6 md:px-10 h-16 flex items-center gap-8">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 bg-[#E50914] rounded-sm flex items-center justify-center">
-            <Film size={18} className="text-white" />
-          </div>
+          <PopcornIcon size={30} />
           <span className="text-xl font-black tracking-tight text-white">
-            Cine<span className="text-[#E50914]">AI</span>
+            Pop<span className="text-[#E50914]">corn</span>
           </span>
         </Link>
 
