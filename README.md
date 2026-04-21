@@ -2,21 +2,21 @@
 
 **CSE 573: Semantic Web Mining · Group 18 · Spring 2026 · Arizona State University**
 
-A hybrid movie recommendation system that combines classical data mining with deep learning and semantic modeling, surfaced through a Netflix-style frontend.
+A hybrid movie recommendation system that combines classical data mining with deep learning and semantic modeling, surfaced through a Netflix-style frontend called **Popcorn**.
 
 ---
 
 ## Overview
 
-CineAI addresses the limitations of single-model recommenders by fusing three parallel recommendation branches:
+Popcorn addresses the limitations of single-model recommenders by fusing three parallel recommendation branches:
 
 | Model | Purpose | Data |
 |---|---|---|
 | **OCCF** (One-Class Collaborative Filtering) | Long-term preference modeling via implicit feedback | MovieLens 20M |
 | **GRU4Rec** | Session-based next-item prediction via Gated Recurrent Units | Timestamped interaction sequences |
-| **Knowledge Graph** (Neo4j + TMDB) | Semantic relationships: genres, cast, directors, keywords | TMDB API (~24K movies) |
+| **Knowledge Graph** | Semantic relationships: genres, cast, directors, keywords | TMDB API (~24K movies) |
 
-Scores from all three branches are normalized and fused through a weighted re-ranking layer. An LLM layer interprets natural-language queries into structured filters applied before retrieval.
+Scores from all three branches are normalized and fused through a weighted re-ranking layer. A local LLM (Phi-3 Mini via Ollama) interprets natural-language queries into structured filters and generates per-recommendation explanations.
 
 ---
 
@@ -26,37 +26,50 @@ Scores from all three branches are normalized and fused through a weighted re-ra
 .
 ├── backend/
 │   ├── models/
-│   │   ├── gru4rec.py       # session-based next-item recommendation (GRU)
-│   │   ├── kg.py            # semantic similarity via knowledge graph
-│   │   └── occf.py          # long-term preference via ALS (implicit feedback)
+│   │   ├── gru4rec.py           # session-based next-item recommendation (GRU)
+│   │   ├── kg.py                # semantic similarity via in-memory knowledge graph
+│   │   └── occf.py              # long-term preference via ALS (implicit feedback)
 │   ├── preprocessing/
 │   │   ├── __init__.py
-│   │   ├── config.py        # paths, split ratios, session gap constant
-│   │   ├── clean.py         # one cleaning function per CSV file
-│   │   ├── split.py         # 80/10/10 chronological split per user
-│   │   ├── sessions.py      # GRU4Rec session construction
-│   │   └── storage.py       # Parquet writer and SQLite schema builder
-│   ├── preprocess.py        # main entry point
+│   │   ├── config.py            # paths, split ratios, session gap constant
+│   │   ├── clean.py             # one cleaning function per CSV file
+│   │   ├── split.py             # 80/10/10 chronological split per user
+│   │   ├── sessions.py          # GRU4Rec session construction
+│   │   ├── storage.py           # Parquet writer and SQLite schema builder
+│   │   └── tmdb_fetch.py        # async bulk TMDB metadata fetcher
+│   ├── evaluation/
+│   │   ├── __init__.py
+│   │   ├── metrics.py           # Precision@K, Recall@K, NDCG@K, MAP@K, HitRate@K, MRR@K
+│   │   ├── baselines.py         # PopularityBaseline, NeighborhoodCF
+│   │   └── run_eval.py          # full evaluation runner (all 6 models)
+│   ├── api.py                   # FastAPI app (5 endpoints)
+│   ├── fusion.py                # hybrid fusion layer + weight tuning
+│   ├── llm.py                   # Phi-3 Mini (Ollama) query parsing + explanations
+│   ├── preprocess.py            # preprocessing entry point
 │   └── requirements.txt
 ├── data/
-│   └── processed/           # output of preprocessing (gitignored, reproducible)
+│   └── processed/               # output of preprocessing (gitignored, reproducible)
 │       ├── movies.parquet
 │       ├── ratings.parquet
 │       ├── links.parquet
 │       ├── tags.parquet
 │       ├── genome_scores.parquet
 │       ├── sessions.parquet
-│       └── cineai.db
+│       ├── tmdb_metadata.parquet  # produced by tmdb_fetch.py
+│       └── popcorn.db
 ├── frontend/
 │   ├── src/
-│   │   ├── components/      # Navbar, HeroBanner, MovieCard, MovieRow, RecommendationBadge, Footer
-│   │   ├── pages/           # Home, Search, MovieDetail, Profile
-│   │   ├── data/            # Mock dataset (20 movies, recommendation rows, user profile)
-│   │   ├── hooks/           # useScrolled
-│   │   └── types/           # TypeScript interfaces
+│   │   ├── api/
+│   │   │   └── client.ts        # typed API client (proxied to backend)
+│   │   ├── components/          # Navbar, HeroBanner, MovieCard, MovieRow, RecommendationBadge, Footer
+│   │   ├── pages/               # Home, Search, MovieDetail, Profile
+│   │   ├── data/                # mock dataset (fallback when API is warming up)
+│   │   ├── hooks/               # useScrolled
+│   │   └── types/               # TypeScript interfaces
 │   ├── package.json
-│   └── vite.config.ts
-├── ml-20m/                  # raw MovieLens 20M CSVs (gitignored)
+│   └── vite.config.ts           # proxies /api → http://localhost:8000
+├── .env.example                 # environment variable template
+├── ml-20m/                      # raw MovieLens 20M CSVs (gitignored)
 ├── report/
 │   ├── SP26_Group_Proposal_Group18_Project8_PDF.pdf
 │   └── Group18-Project8-SP26-Group-Project-Presentation.pptx.pdf
@@ -65,14 +78,24 @@ Scores from all three branches are normalized and fused through a weighted re-ra
 
 ---
 
-## Data Preprocessing
+## Quick Start
 
-### Prerequisites
+### 1. Environment variables
 
-- Python 3.10+
-- The `ml-20m/` folder present at the repo root (download from [MovieLens 20M](https://grouplens.org/datasets/movielens/20m/))
+```bash
+cp .env.example .env
+# Fill in TMDB_READ_TOKEN and TMDB_API_KEY
+```
 
-### Setup
+`.env.example`:
+```
+TMDB_READ_TOKEN=your_tmdb_read_access_token_here
+TMDB_API_KEY=your_tmdb_api_key_here
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=phi3:mini
+```
+
+### 2. Backend
 
 ```bash
 cd backend
@@ -81,13 +104,113 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+Run preprocessing (once, from the repo root or from `backend/` as shown by the script docs):
+```bash
+python preprocess.py
+```
+
+Fetch TMDB metadata after preprocessing (once, or re-run any time you want to refresh/enrich metadata):
+```bash
+python -m backend.preprocessing.tmdb_fetch
+```
+
+### 3. LLM (optional but recommended)
+
+Install [Ollama](https://ollama.com), then:
+```bash
+ollama pull phi3:mini
+ollama serve          # runs on http://localhost:11434 by default
+```
+
+The backend falls back gracefully if Ollama is unavailable — search still works, just without LLM-parsed intent or per-movie explanations.
+
+### 4. Start the backend
+
+```bash
+uvicorn backend.api:app --reload
+# API available at http://localhost:8000
+```
+
+On startup, the backend loads:
+- `data/processed/movies.parquet`
+- `data/processed/ratings.parquet`
+- `data/processed/links.parquet`
+- `data/processed/tmdb_metadata.parquet` if present
+
+It also warms the recommendation models, so the frontend may show a loading state until `/api/health` reports ready.
+
+### 5. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev           # dev server at http://localhost:5173
+```
+
+The Vite dev server proxies all `/api` requests to `http://localhost:8000`. Start the backend first. The frontend now expects backend data and no longer uses mock movie/demo fallbacks.
+
+### Recommended run order
+
+For a fresh setup:
+
+```bash
+# 1. Install backend dependencies
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Build processed MovieLens artifacts
+python preprocess.py
+
+# 3. Enrich with TMDB metadata
+python -m backend.preprocessing.tmdb_fetch
+
+# 4. In another terminal, start Ollama
+ollama pull phi3:mini
+ollama serve
+
+# 5. Start the backend API
+uvicorn backend.api:app --reload
+
+# 6. In another terminal, start the frontend
+cd frontend
+npm install
+npm run dev
+```
+
+For normal daily development after setup:
+
+```bash
+# terminal 1
+ollama serve
+
+# terminal 2
+cd backend
+source .venv/bin/activate
+uvicorn backend.api:app --reload
+
+# terminal 3
+cd frontend
+npm run dev
+```
+
+Only re-run `python -m backend.preprocessing.tmdb_fetch` when you need to create or refresh `data/processed/tmdb_metadata.parquet`.
+
+---
+
+## Data Preprocessing
+
+### Prerequisites
+
+- Python 3.10+
+- The `ml-20m/` folder at the repo root ([MovieLens 20M](https://grouplens.org/datasets/movielens/20m/))
+
 ### Run
 
 ```bash
 python preprocess.py
 ```
-
-All output is written to `../data/processed/` (relative to `backend/`).
 
 ### Expected Output
 
@@ -104,8 +227,24 @@ data/processed/
   tags.parquet            465,541 rows     4.3 MB
   genome_scores.parquet 11,709,768 rows    19.2 MB
   sessions.parquet      15,611,192 rows   100.9 MB
-  cineai.db                                3.3 MB
+  popcorn.db                               3.3 MB
 ```
+
+### TMDB Metadata Fetch
+
+Enriches each movie with overview, cast, director, keywords, runtime, poster path, backdrop path, and certification. Run after preprocessing:
+
+```bash
+python -m backend.preprocessing.tmdb_fetch
+```
+
+- Reads `data/processed/links.parquet` for the movieId ↔ tmdbId mapping
+- Writes `data/processed/tmdb_metadata.parquet`
+- Resumable — already-fetched rows are skipped on re-run
+- Rate-limited to 40 concurrent requests (TMDB free-tier safe)
+- Reads `TMDB_READ_TOKEN` from `.env`
+
+Once this file exists, the API and Knowledge Graph automatically use richer cast/director/keyword data, and the frontend can display TMDB-backed posters, backdrops, overview text, runtime, cast, director, and maturity ratings.
 
 ---
 
@@ -167,17 +306,11 @@ Reads all six CSVs from `ml-20m/` using pandas with explicit dtypes to control m
 
 **Stage 4: Clean remaining files**
 
-`links.csv`:
-- Filters to movie IDs present in the cleaned movies table.
-- Casts `imdbId` and `tmdbId` to nullable integers (some entries are missing).
+`links.csv`: Filters to valid movie IDs; casts `imdbId` and `tmdbId` to nullable integers.
 
-`tags.csv`:
-- Strips whitespace from tag strings and drops null or empty tags.
-- Filters to valid movie IDs and user IDs from the cleaned ratings.
+`tags.csv`: Strips whitespace, drops null/empty tags, filters to valid movie and user IDs.
 
-`genome-scores.csv`:
-- Filters to valid movie IDs.
-- Clamps any relevance values outside [0.0, 1.0] and logs a warning if any are found.
+`genome-scores.csv`: Filters to valid movie IDs; clamps relevance values to [0.0, 1.0].
 
 **Stage 5: Train / val / test split**
 
@@ -189,300 +322,147 @@ Applied per user, in chronological order by timestamp:
 | val | 10% | 2.0 M |
 | test | 10% | 2.1 M |
 
-The `split` column is added directly to `ratings.parquet` rather than creating three separate files. Downstream consumers can filter with `df[df["split"] == "train"]`.
+The `split` column is added directly to `ratings.parquet`. Downstream consumers filter with `df[df["split"] == "train"]`.
 
 **Stage 6: GRU4Rec session construction**
-
-- Uses only training ratings.
-- Sorts interactions per user by timestamp.
-- A new session begins when the gap between consecutive interactions exceeds 30 minutes (configurable via `SESSION_GAP_SECONDS` in `config.py`).
-- Sessions with only one item are discarded (not useful for next-item prediction).
-- Each row in `sessions.parquet` is one interaction, identified by `sessionId` (`"{userId}_{session_index}"`), with a 0-indexed `position` column tracking placement within the session.
+- Uses only training ratings, sorted by timestamp per user.
+- New session begins when the gap between consecutive interactions exceeds 30 minutes (`SESSION_GAP_SECONDS` in `config.py`).
+- Sessions with only one item are discarded.
+- Each row in `sessions.parquet` is one interaction, identified by `sessionId` (`"{userId}_{session_index}"`) with a 0-indexed `position` column.
 
 **Stage 7: Write output**
-
-- All DataFrames are written as Snappy-compressed Parquet via PyArrow for fast columnar reads by pandas and PyTorch data loaders.
-- `cineai.db` is a SQLite database containing:
-  - `movies` table: `movieId`, `title`, `year`
-  - `genres` table: unique genre vocabulary (19 genres)
-  - `movie_genres` table: normalized many-to-many join table
-  - `links` table: `movieId`, `imdbId`, `tmdbId` (key for TMDB enrichment)
-  - `preprocessing_log` table: row counts and timestamps for each run
+- All DataFrames written as Snappy-compressed Parquet via PyArrow.
+- `popcorn.db` is a SQLite database containing `movies`, `genres`, `movie_genres`, `links`, and `preprocessing_log` tables.
 
 ---
 
-## How to Test the Preprocessing
+## Backend API
 
-After running `python preprocess.py`, verify correctness with these checks:
+The FastAPI server exposes 5 endpoints at `http://localhost:8000`:
 
-**1. Confirm files exist and are non-empty**
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/health` | `{ ready: bool, status: str }` — poll during model warmup |
+| `GET` | `/api/recommendations` | Top-N recommendations (`model`, `user_id`, `n`, `query` params) |
+| `GET` | `/api/movies/{movie_id}` | Full metadata for a single movie |
+| `GET` | `/api/search` | LLM-parsed semantic search with intent chips and explanations |
+
+### `model` parameter values
+
+| Value | Description |
+|---|---|
+| `hybrid` | Weighted fusion of all three models (default) |
+| `occf` | OCCF only |
+| `gru4rec` | GRU4Rec only |
+| `kg` | Knowledge Graph only |
+| `trending` | Most-rated globally |
+
+### Start the server
 
 ```bash
-ls -lh ../data/processed/
+# from repo root
+uvicorn backend.api:app --reload
+
+# or from inside backend/
+uvicorn api:app --reload
 ```
 
-**2. Verify split ratios**
-
-```python
-import pandas as pd
-r = pd.read_parquet("../data/processed/ratings.parquet")
-print(r.groupby("split").size())
-# Expected: train ~15.9M, val ~2.0M, test ~2.1M
-```
-
-**3. Check no data leaks across splits (per user, train is always older)**
-
-```python
-import pandas as pd
-r = pd.read_parquet("../data/processed/ratings.parquet")
-sample_user = r["userId"].iloc[0]
-user = r[r["userId"] == sample_user].sort_values("timestamp")
-print(user[["timestamp", "split"]].to_string())
-# All train rows should have earlier timestamps than val, val before test
-```
-
-**4. Check session structure**
-
-```python
-import pandas as pd
-s = pd.read_parquet("../data/processed/sessions.parquet")
-print(f"Unique sessions : {s['sessionId'].nunique():,}")
-print(f"Avg session len : {len(s) / s['sessionId'].nunique():.1f}")
-print(f"Min session len : {s.groupby('sessionId').size().min()}")
-# Min should be 2 (single-item sessions are filtered)
-```
-
-**5. Check movie-links coverage**
-
-```python
-import pandas as pd
-links = pd.read_parquet("../data/processed/links.parquet")
-coverage = links["tmdbId"].notna().mean() * 100
-print(f"TMDB coverage: {coverage:.1f}%")
-# Expected: ~99%
-```
-
-**6. Query the SQLite database**
-
-```python
-import sqlite3
-con = sqlite3.connect("../data/processed/cineai.db")
-print(con.execute("SELECT * FROM preprocessing_log").fetchall())
-print(con.execute("SELECT genre FROM genres ORDER BY genre").fetchall())
-print(con.execute(
-    "SELECT m.title, m.year, l.tmdbId FROM movies m JOIN links l USING(movieId) LIMIT 5"
-).fetchall())
-con.close()
-```
-
-**7. Spot-check a known movie**
-
-```python
-import pandas as pd
-movies = pd.read_parquet("../data/processed/movies.parquet")
-toy_story = movies[movies["movieId"] == 1]
-print(toy_story[["movieId", "title", "year", "genres"]])
-# Expected: title="Toy Story", year=1995, genres=["Adventure", "Animation", ...]
-```
----
-
-# Recommendation Models
-
-This section describes how to run the three core recommendation models in the backend:
-
-- OCCF for long-term user preference modeling
-- GRU4Rec for session-based next-item recommendation
-- Knowledge Graph for semantic similarity recommendation
+Models load in a background thread on startup. `/api/health` returns `ready: false` until training completes (typically 2–5 minutes on first run).
 
 ---
 
-## Prerequisites
+## Recommendation Models
 
-- Python 3.10+
-- Preprocessing must be completed successfully
-- The following files should exist in `data/processed/`:
-  - `ratings.parquet`
-  - `sessions.parquet`
-  - `movies.parquet`
-- Optional for richer Knowledge Graph results:
-  - TMDB-enriched metadata file in `data/processed/` if available
+### OCCF — One-Class Collaborative Filtering
 
----
+Treats observed ratings as positive implicit feedback with confidence weighting. Factorizes the user-item matrix into latent embeddings via Alternating Least Squares. Captures stable, long-term taste preferences.
 
-## Setup
+**Library:** `implicit` (ALS)
 
-```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-pip install implicit scipy pandas torch scikit-learn
-```
-
----
-
-## 1. OCCF Model
-
-### What it does
-
-OCCF (One-Class Collaborative Filtering) learns long-term user preference from implicit feedback. It uses the processed ratings matrix and returns Top-N movie recommendations for a given user.
-
-### Input
-
-```
-data/processed/ratings.parquet
-```
-
-### Run
-
+**Run standalone:**
 ```bash
 python models/occf.py
 ```
 
-### Expected Output
+### GRU4Rec — Session-Based Recommendation
 
-```
-Loading data...
-Data loaded. Matrix shape: (138493, 26744)
-Training OCCF model...
-Training complete.
-Sample recommendations for user 1:
-{'movieId': 1197, 'title': 'Princess Bride, The', 'score': 1.092614, 'model': 'OCCF'}
-{'movieId': 1206, 'title': 'Clockwork Orange, A', 'score': 0.949217, 'model': 'OCCF'}
-{'movieId': 2571, 'title': 'Matrix, The', 'score': 0.936054, 'model': 'OCCF'}
-...
-```
+Constructs user sessions from timestamped interactions using a time-gap rule. A Gated Recurrent Unit network predicts the next item given the session sequence. Handles short-term, rapidly-shifting interests.
 
-### What to verify
+**Library:** PyTorch
 
-- The model loads `ratings.parquet` successfully
-- Training completes without errors
-- Output contains `movieId`, `title`, `score`, and `model`
-- Recommendations are returned as a ranked list
-- No duplicate movies appear in the list
-
----
-
-## 2. GRU4Rec Model
-
-### What it does
-
-GRU4Rec learns short-term user intent from session sequences. It uses the session data built from timestamped interactions and predicts the next likely movie in the session.
-
-### Input
-
-```
-data/processed/sessions.parquet
-```
-
-### Run
-
+**Run standalone:**
 ```bash
 python models/gru4rec.py
 ```
 
-### Expected Output
+### Knowledge Graph — Semantic Similarity
 
-```
-Loading data...
-Data loaded. Train samples: 432780 | Val samples: 48086
-Items: 21352 | Device: cpu
-Training GRU4Rec model...
-Epoch 1/3 - loss: 8.2201
-Epoch 2/3 - loss: 7.6418
-Epoch 3/3 - loss: 7.3248
-Training complete.
-Sample recommendations for user 1:
-{'movieId': 1978, 'title': 'Friday the 13th Part V: A New Beginning', 'score': 3.003251, 'model': 'GRU4Rec'}
-{'movieId': 5541, 'title': 'Hot Shots!', 'score': 2.922863, 'model': 'GRU4Rec'}
-{'movieId': 1981, 'title': 'Friday the 13th Part VIII: Jason Takes Manhattan', 'score': 2.666821, 'model': 'GRU4Rec'}
-...
-```
+Builds an in-memory heterogeneous graph where nodes are movies, genres, cast members, directors, and keywords, and edges encode semantic relationships. TF-IDF text similarity and entity-boost scoring provide semantic recommendations and cold-start support (no user history required).
 
-### What to verify
+Automatically uses TMDB metadata (`tmdb_metadata.parquet`) for richer cast/keyword edges when available.
 
-- The model loads `sessions.parquet` successfully
-- Training loss decreases across epochs
-- Output contains `movieId`, `title`, `score`, and `model`
-- Recommendations are returned in a consistent format
-- No duplicate movies appear in the list
+**Library:** `scikit-learn` (TF-IDF)
 
----
-
-## 3. Knowledge Graph Model
-
-### What it does
-
-The Knowledge Graph model captures semantic similarity between movies using metadata such as genres, cast, directors, keywords, and related text features.
-
-It supports:
-- Movie-to-movie recommendation
-- History-based recommendation
-- Query-based recommendation
-
-### Input
-
-```
-data/processed/movies.parquet
-data/processed/movies.csv          # fallback
-```
-
-Optional: TMDB-enriched metadata file if available
-
-### Run
-
+**Run standalone:**
 ```bash
 python models/kg.py
 ```
 
-### Expected Output
+### Hybrid Fusion Layer
 
-```
-Loading movies from /.../data/processed/movies.parquet ...
-Loading metadata ...
-Building knowledge graph ...
-Graph built: 27297 nodes  (27278 movies + 19 entities)
-Ready. 27278 movies indexed.
+Scores from all three models are min-max normalized per request, then aggregated with tunable weights (default: OCCF 0.40, GRU4Rec 0.30, KG 0.30). Weights can be optimised on a validation set via `HybridRecommender.tune_weights()` (grid search, objective: NDCG@10).
 
-── Recommendations for movieId=2571 ──
-  [0.3094] Matrix Revolutions, The
-          because: thriller, action, sci-fi
-  [0.2490] Matrix Reloaded, The
-          because: thriller, action, sci-fi
-  [0.1594] Replicant
-          because: thriller, action, sci-fi
-...
+---
 
-── History-based recommendations ──
-  [0.4781] Money Train
-  [0.4781] Bad Boys
-  [0.4781] Strange Days
-...
+## LLM Augmentation (Phi-3 Mini)
 
-── Query: 'crime heist thriller' ──
-  [0.5879] Maiden Heist, The
-  [0.5692] Thriller: A Cruel Picture (Thriller - en grym film)
-  [0.4999] Crime Spree
-...
+`backend/llm.py` wraps a locally-running Phi-3 Mini 3.8B model via Ollama. It provides two functions:
 
-── Explanation ──
-"Matrix, The" → "Pulp Fiction"  |  KG score: 0.0625  |  Shared: "thriller"
+- **`parse_query(query)`** — converts a natural-language query into structured intent: `{genres, mood, seed_movies, keywords, constraints}`
+- **`generate_explanations(movies, query, intent)`** — produces a ≤12-word explanation per recommended movie
+
+The `/api/search` endpoint uses both. The frontend displays parsed intent as colour-coded chips (blue = genre, purple = mood, green = seed movie, amber = keyword).
+
+The system degrades gracefully if Ollama is not running — search still works via KG semantic similarity.
+
+### Setup
+
+```bash
+# Install Ollama: https://ollama.com
+ollama pull phi3:mini
+ollama serve
 ```
 
-### What to verify
+---
 
-- The model loads movie metadata successfully
-- The graph is built without errors
-- Recommendations are returned for a movie ID, a history list, and a text query
-- Output contains `movieId`, `title`, `score`, and `model`
-- The `because` field appears for movie/history recommendations
-- No duplicate movies appear in the list
+## Evaluation
+
+Run the full evaluation suite comparing all models on a held-out test set:
+
+```bash
+python -m backend.evaluation.run_eval
+# Options: --users 500 --k 10 --k2 20
+```
+
+**Split strategy:** 80/20 per-user temporal holdout (within the already-preprocessed training split).
+
+**Models compared:** Popularity, NeighborhoodCF (cosine, k=20), OCCF, GRU4Rec, KnowledgeGraph, Hybrid.
+
+**Metrics:**
+
+| Metric | K values |
+|---|---|
+| Precision@K, Recall@K | 10 |
+| NDCG@K | 10, 20 |
+| MAP@K, HitRate@K, MRR@K | 10 |
+
+Results are printed as a table and saved to `data/processed/eval_results.json`.
 
 ---
 
 ## Model Output Format
 
-All models return the same structure for easy integration into the fusion layer:
+All models return the same structure for easy fusion:
 
 ```json
 {
@@ -493,13 +473,13 @@ All models return the same structure for easy integration into the fusion layer:
 }
 ```
 
-The Knowledge Graph model also includes an explanation field:
+Knowledge Graph also includes an explanation field:
 
 ```json
 {
   "movieId": 6934,
   "title": "Matrix Revolutions, The",
-  "score": 0.586761,
+  "score": 0.587,
   "model": "KnowledgeGraph",
   "because": ["thriller", "action", "sci-fi"]
 }
@@ -507,62 +487,26 @@ The Knowledge Graph model also includes an explanation field:
 
 ---
 
-## Validation Checklist
-
-### OCCF
-- [ ] Loads `ratings.parquet`
-- [ ] Trains ALS model
-- [ ] Prints a Top-N recommendation list
-
-### GRU4Rec
-- [ ] Loads `sessions.parquet`
-- [ ] Trains GRU model
-- [ ] Loss decreases across epochs
-- [ ] Prints a Top-N recommendation list
-
-### Knowledge Graph
-- [ ] Loads movie metadata
-- [ ] Builds graph
-- [ ] Produces semantic recommendations
-- [ ] Prints query and explanation outputs
-
-### All models
-- [ ] Output contains `movieId`, `title`, `score`, `model`
-- [ ] No duplicate movies in any Top-N list
-
----
-
-## Notes
-
-| Model | Role |
-|---|---|
-| OCCF | Long-term taste |
-| GRU4Rec | Short-term session behavior |
-| Knowledge Graph | Semantic similarity |
-
-These three outputs are designed to feed into the final hybrid fusion layer.
----
-
 ## Frontend
 
-A Netflix-inspired UI that surfaces all three recommendation models with clear attribution.
+A Netflix-inspired UI called **Popcorn** that surfaces all three recommendation models with clear attribution.
 
 ### Stack
 
-- **React 18** + **TypeScript**: component model and type safety
-- **Vite**: fast dev server and build
-- **Tailwind CSS**: utility-first styling
-- **Framer Motion**: page transitions, scroll-reveal animations, animated score bars
-- **React Router v6**: client-side routing
-- **Lucide React**: icon set
+- **React 18** + **TypeScript**
+- **Vite** — fast dev server with `/api` proxy to backend
+- **Tailwind CSS** — utility-first styling
+- **Framer Motion** — page transitions, scroll-reveal, animated score bars
+- **React Router v6** — client-side routing
+- **Lucide React** — icon set
 
 ### Pages
 
 | Route | Description |
 |---|---|
-| `/` | Home: auto-rotating hero banner + 6 model-labeled recommendation carousels |
-| `/search` | Discover: LLM query interpreter with genre, model, and rating filters |
-| `/movie/:id` | Movie Detail: backdrop, cast, model score breakdown, similar movies |
+| `/` | Home: auto-rotating hero banner + 6 model-labeled recommendation rows (real API data with mock fallback) |
+| `/search` | Discover: LLM query interpreter with parsed intent chips, genre/model/rating filters |
+| `/movie/:id` | Movie Detail: backdrop, cast, model score breakdown, "More Like This" via KG |
 | `/profile` | Profile: taste analytics, model contribution chart, watch history |
 
 ### Running the Frontend
@@ -576,15 +520,14 @@ npm run build     # production build
 
 ### Design System
 
-- **Background:** `#0f0f0f` deep black base with `#1a1a1a` card surfaces
-- **Accent:** `#E50914` Netflix red for primary CTAs and branding
+- **Background:** `#0f0f0f` deep black base, `#1a1a1a` card surfaces
+- **Accent:** `#E50914` red for primary CTAs
 - **Model color coding:**
   - OCCF: Blue `#3B82F6`
   - GRU4Rec: Emerald `#10B981`
   - Knowledge Graph: Violet `#8B5CF6`
   - Hybrid Fusion: Amber `#F59E0B`
   - Trending: Red `#EF4444`
-- Movie posters use CSS gradients with no external image dependencies in the scaffold.
 
 ---
 
@@ -593,58 +536,15 @@ npm run build     # production build
 ### MovieLens 20M
 
 - 20 million ratings across 27,278 movies by 138,493 users
-- Fields: `userId`, `movieId`, `rating` (0.5 to 5.0), `timestamp`
-- Used for: OCCF training (implicit feedback) and GRU4Rec session construction
+- Fields: `userId`, `movieId`, `rating` (0.5–5.0), `timestamp`
 - Download: [https://grouplens.org/datasets/movielens/20m/](https://grouplens.org/datasets/movielens/20m/)
-- Place the unzipped folder at `ml-20m/` in the repo root before running preprocessing.
+- Place the unzipped folder at `ml-20m/` in the repo root.
 
 ### TMDB API
 
-- ~24,000 movies enriched with genres, cast, crew, keywords, poster paths, overview
-- Joined to MovieLens via `tmdbId` from `links.csv` (99.1% coverage)
-- Used for: Knowledge Graph construction and LLM query metadata
-
----
-
-## Models
-
-### OCCF: One-Class Collaborative Filtering
-
-Treats all observed ratings as positive implicit feedback with confidence weighting. Factorizes the user-item matrix into latent embeddings. Captures stable, long-term taste preferences.
-
-**Libraries:** `implicit`, `LightFM`
-
-### GRU4Rec: Session-Based Recommendation
-
-Constructs user sessions from timestamped interactions using a time-gap rule. A Gated Recurrent Unit network predicts the next item given the session sequence. Handles short-term, rapidly-shifting interests.
-
-**Libraries:** PyTorch, RecBole
-
-### Knowledge Graph: Neo4j + TMDB
-
-Builds a graph where nodes are movies, genres, actors, directors, and keywords, and edges encode semantic relationships (`DIRECTED_BY`, `HAS_GENRE`, `FEATURES_ACTOR`). Graph traversal and embedding via PyKEEN provide semantic similarity and cold-start recommendations.
-
-**Libraries:** Neo4j, PyKEEN
-
-### Hybrid Fusion Layer
-
-Scores from all three models are min-max normalized per user, then aggregated with tunable weights optimized on the validation set (objective: NDCG@10). A local Mistral 7B model re-ranks the top-K candidates when a natural-language query is present.
-
----
-
-## Evaluation
-
-**Split strategy:** 80/10/10 train/validation/test per user, chronological holdout
-
-**Baselines:** Popularity, neighborhood-based CF, individual model branches
-
-**Metrics:**
-
-| Task | Metrics |
-|---|---|
-| Top-N recommendation | Precision@K, Recall@K, NDCG@K, MAP@K (K = 10, 20) |
-| Session-based (GRU4Rec) | HitRate@K, MRR@K |
-| Cold-start / long-tail | Broken out separately per user group |
+- ~24,000 movies enriched with genres, cast, crew, keywords, poster paths, overview, runtime, vote average
+- Joined to MovieLens via `tmdbId` from `links.csv` (~99% coverage)
+- Get a free API key at [https://www.themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
 
 ---
 
@@ -652,11 +552,11 @@ Scores from all three models are min-max normalized per user, then aggregated wi
 
 | Member | Primary Responsibility |
 |---|---|
-| **Pranjal Padakannaya** | Project repo, MovieLens preprocessing, train/val/test splits |
+| **Pranjal Padakannaya** | Project repo, MovieLens preprocessing, train/val/test splits, API layer, frontend |
 | **Atharva Bhavin Thaker** | Baselines (popularity, neighborhood CF), evaluation scripts |
 | **Sanjay Soralamavu Dev** | OCCF implementation, hyperparameter tuning |
 | **Sachin Shivanand Shankarikoppa** | GRU4Rec session construction, training, session metrics |
-| **Rahma Abuhannoud** | TMDB enrichment pipeline, Neo4j Knowledge Graph construction |
+| **Rahma Abuhannoud** | TMDB enrichment pipeline, Knowledge Graph construction |
 | **Mawadda Abuhannoud** | Evaluation scripts, score normalization, fusion layer |
 
 ---

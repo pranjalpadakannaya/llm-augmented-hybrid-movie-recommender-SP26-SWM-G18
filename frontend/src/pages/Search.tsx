@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Search as SearchIcon, Sparkles, X, SlidersHorizontal, Star, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Movie, ModelType } from '../types';
-import { MOVIES, ALL_GENRES, EXAMPLE_QUERIES } from '../data/mockData';
 import RecommendationBadge from '../components/RecommendationBadge';
+import { searchMovies, ParsedIntent } from '../api/client';
 
 const MODEL_FILTERS: { label: string; value: ModelType | 'All' }[] = [
   { label: 'All Models', value: 'All' },
@@ -14,48 +14,15 @@ const MODEL_FILTERS: { label: string; value: ModelType | 'All' }[] = [
   { label: 'Hybrid', value: 'Hybrid' },
 ];
 
-function simulateSearch(query: string): { interpreted: string; filters: string[]; results: Movie[] } {
-  const q = query.toLowerCase();
-  let results = [...MOVIES];
-  const filters: string[] = [];
-  let interpreted = query;
+const EXAMPLE_QUERIES = [
+  'Mind-bending sci-fi with time travel and complex narratives',
+  'Movies like Parasite with dark social commentary',
+  'Cerebral thrillers directed by Christopher Nolan',
+  'Dystopian future worlds with artificial intelligence',
+  'Emotional dramas with surprising endings',
+];
 
-  if (q.includes('sci-fi') || q.includes('science fiction') || q.includes('space') || q.includes('future')) {
-    results = results.filter((m) => m.genres.includes('Sci-Fi'));
-    filters.push('Genre: Sci-Fi');
-    interpreted = `Science Fiction films — speculative, futuristic, or conceptually ambitious`;
-  } else if (q.includes('nolan') || q.includes('christopher')) {
-    results = results.filter((m) => m.director.toLowerCase().includes('nolan'));
-    filters.push('Director: Christopher Nolan');
-    interpreted = `Films directed by Christopher Nolan — known for non-linear storytelling`;
-  } else if (q.includes('thriller') || q.includes('suspense') || q.includes('dark')) {
-    results = results.filter((m) => m.genres.includes('Thriller') || m.genres.includes('Crime'));
-    filters.push('Genre: Thriller / Crime');
-    interpreted = `Dark, suspenseful thrillers with psychological depth`;
-  } else if (q.includes('drama')) {
-    results = results.filter((m) => m.genres.includes('Drama'));
-    filters.push('Genre: Drama');
-    interpreted = `Character-driven dramas with emotional depth`;
-  } else if (q.includes('inception') || q.includes('mind') || q.includes('complex')) {
-    results = results.filter((m) => m.genres.includes('Sci-Fi') || m.genres.includes('Thriller'));
-    filters.push('Theme: Mind-bending / Complex narrative');
-    interpreted = `Mind-bending films with complex, layered narratives`;
-  } else if (q.includes('parasite') || q.includes('class') || q.includes('social')) {
-    results = results.filter((m) =>
-      ['Parasite', 'Joker', 'Get Out', 'Fight Club', 'Pulp Fiction'].includes(m.title)
-    );
-    filters.push('Theme: Social commentary');
-    interpreted = `Films exploring class divide, inequality, and social critique`;
-  } else if (q.length > 0) {
-    // Generic relevance sort
-    results = results.sort(() => Math.random() - 0.4);
-    interpreted = `Movies matching: "${query}"`;
-  }
-
-  return { interpreted, filters, results: results.slice(0, 12) };
-}
-
-export default function Search() {
+export default function Search({ userId }: { userId: number }) {
   const [query, setQuery] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [isInterpreting, setIsInterpreting] = useState(false);
@@ -66,6 +33,8 @@ export default function Search() {
   const [minRating, setMinRating] = useState(0);
   const [activeModel, setActiveModel] = useState<ModelType | 'All'>('All');
   const [showFilters, setShowFilters] = useState(false);
+  const [parsedIntent, setParsedIntent] = useState<ParsedIntent | null>(null);
+  const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -76,15 +45,26 @@ export default function Search() {
     setIsInterpreting(true);
     setResults([]);
     setInterpretedQuery('');
+    setParsedIntent(null);
+    setError('');
 
-    // Simulate LLM interpretation delay
-    await new Promise((r) => setTimeout(r, 900));
-    const { interpreted, filters, results: res } = simulateSearch(q);
-    setInterpretedQuery(interpreted);
-    setAppliedFilters(filters);
-    setIsInterpreting(false);
-    setResults(res);
+    try {
+      const data = await searchMovies(q, userId);
+      setInterpretedQuery(data.interpreted);
+      setAppliedFilters(data.filters);
+      setParsedIntent(data.parsedIntent ?? null);
+      setResults(data.movies);
+    } catch {
+      setResults([]);
+      setInterpretedQuery('');
+      setAppliedFilters([]);
+      setError('Search is unavailable until the backend API is running and ready.');
+    } finally {
+      setIsInterpreting(false);
+    }
   };
+
+  const availableGenres = Array.from(new Set(results.flatMap((m) => m.genres))).sort();
 
   const filteredResults = results
     .filter((m) => activeGenres.length === 0 || activeGenres.some((g) => m.genres.includes(g)))
@@ -103,6 +83,8 @@ export default function Search() {
     setActiveGenres([]);
     setMinRating(0);
     setActiveModel('All');
+    setParsedIntent(null);
+    setError('');
     inputRef.current?.focus();
   };
 
@@ -208,11 +190,35 @@ export default function Search() {
                       <span className="text-sm text-[#888]">Interpreting your query with LLM...</span>
                     </div>
                   ) : (
-                    <p className="text-sm text-[#ddd]">
+                    <p className="text-sm text-[#ddd] mb-2">
                       "{interpretedQuery}"
                     </p>
                   )}
-                  {appliedFilters.length > 0 && !isInterpreting && (
+                  {!isInterpreting && parsedIntent && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {parsedIntent.genres.map((g) => (
+                        <span key={g} className="text-xs bg-blue-500/15 text-blue-300 border border-blue-500/25 px-2 py-0.5 rounded">
+                          🎬 {g}
+                        </span>
+                      ))}
+                      {parsedIntent.mood && (
+                        <span className="text-xs bg-purple-500/15 text-purple-300 border border-purple-500/25 px-2 py-0.5 rounded">
+                          ✨ {parsedIntent.mood}
+                        </span>
+                      )}
+                      {parsedIntent.seed_movies.map((m) => (
+                        <span key={m} className="text-xs bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 px-2 py-0.5 rounded">
+                          🎥 {m}
+                        </span>
+                      ))}
+                      {parsedIntent.keywords.map((k) => (
+                        <span key={k} className="text-xs bg-amber-500/15 text-amber-300 border border-amber-500/25 px-2 py-0.5 rounded">
+                          # {k}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {appliedFilters.length > 0 && !isInterpreting && !parsedIntent && (
                     <div className="flex flex-wrap gap-2 mt-2">
                       {appliedFilters.map((f) => (
                         <span key={f} className="text-xs bg-amber-500/15 text-amber-300 border border-amber-500/25 px-2 py-0.5 rounded">
@@ -286,7 +292,7 @@ export default function Search() {
                       <div>
                         <p className="text-xs text-[#666] uppercase tracking-widest mb-2">Genre</p>
                         <div className="flex flex-wrap gap-2">
-                          {ALL_GENRES.map((g) => (
+                          {availableGenres.map((g) => (
                             <button
                               key={g}
                               onClick={() =>
@@ -350,7 +356,7 @@ export default function Search() {
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.04 }}
-                  onClick={() => navigate(`/movie/${movie.id}`)}
+                  onClick={() => navigate(`/movie/${movie.id}`, { state: { movie } })}
                   className="cursor-pointer group"
                 >
                   {/* Poster */}
@@ -360,6 +366,13 @@ export default function Search() {
                       background: `linear-gradient(160deg, ${movie.gradient[0]} 0%, ${movie.gradient[1]} 100%)`,
                     }}
                   >
+                    {movie.posterUrl && (
+                      <img
+                        src={movie.posterUrl}
+                        alt={movie.title}
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                    )}
                     <div className="absolute top-0 left-0 right-0 h-1" style={{ background: movie.accentColor }} />
                     <div className="absolute top-2 right-2 flex items-center gap-1 px-1.5 py-0.5 bg-black/60 rounded text-[10px] font-bold text-yellow-400">
                       <Star size={8} fill="currentColor" />
@@ -399,8 +412,8 @@ export default function Search() {
             <div className="w-16 h-16 rounded-2xl bg-[#1a1a1a] border border-white/10 flex items-center justify-center mx-auto mb-4">
               <SearchIcon size={28} className="text-[#444]" />
             </div>
-            <p className="text-[#888] text-lg font-medium mb-2">No results found</p>
-            <p className="text-[#555] text-sm">Try adjusting your filters or searching with different terms</p>
+            <p className="text-[#888] text-lg font-medium mb-2">{error ? 'Backend search unavailable' : 'No results found'}</p>
+            <p className="text-[#555] text-sm">{error || 'Try adjusting your filters or searching with different terms'}</p>
           </motion.div>
         )}
       </div>

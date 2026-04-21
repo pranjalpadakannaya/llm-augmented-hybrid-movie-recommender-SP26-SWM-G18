@@ -26,7 +26,7 @@ export default function MovieCard({ movie, size = 'md' }: Props) {
       onHoverEnd={() => setHovered(false)}
       whileHover={{ scale: 1.06, zIndex: 30 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
-      onClick={() => navigate(`/movie/${movie.id}`)}
+      onClick={() => navigate(`/movie/${movie.id}`, { state: { movie } })}
     >
       {/* Poster */}
       <div
@@ -35,6 +35,14 @@ export default function MovieCard({ movie, size = 'md' }: Props) {
           background: `linear-gradient(160deg, ${movie.gradient[0]} 0%, ${movie.gradient[1]} 100%)`,
         }}
       >
+        {movie.posterUrl && (
+          <img
+            src={movie.posterUrl}
+            alt={movie.title}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        )}
+
         {/* Decorative background art */}
         <div className="absolute inset-0 opacity-30">
           <div
@@ -96,6 +104,13 @@ export default function MovieCard({ movie, size = 'md' }: Props) {
                 background: `linear-gradient(160deg, ${movie.gradient[0]} 0%, ${movie.gradient[1]} 100%)`,
               }}
             >
+              {movie.backdropUrl && (
+                <img
+                  src={movie.backdropUrl}
+                  alt={movie.title}
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              )}
               <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/60" />
               <div className="absolute bottom-2 left-3">
                 <p className="text-white font-bold text-sm">{movie.title}</p>
@@ -107,7 +122,7 @@ export default function MovieCard({ movie, size = 'md' }: Props) {
               {/* Action buttons */}
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => navigate(`/movie/${movie.id}`)}
+                  onClick={() => navigate(`/movie/${movie.id}`, { state: { movie } })}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-black text-xs font-bold rounded-md hover:bg-gray-200 transition-colors"
                 >
                   <Play size={12} fill="currentColor" />
@@ -117,7 +132,7 @@ export default function MovieCard({ movie, size = 'md' }: Props) {
                   <Plus size={14} />
                 </button>
                 <button
-                  onClick={() => navigate(`/movie/${movie.id}`)}
+                  onClick={() => navigate(`/movie/${movie.id}`, { state: { movie } })}
                   className="ml-auto p-1.5 rounded-full border border-white/30 text-white hover:border-white transition-colors"
                 >
                   <ChevronDown size={14} />

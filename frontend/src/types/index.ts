@@ -11,6 +11,7 @@ export interface Movie {
   title: string;
   year: number;
   rating: number;
+  userRating?: number;
   runtime: number;
   genres: string[];
   overview: string;
@@ -21,6 +22,10 @@ export interface Movie {
   tmdbId: number;
   movieLensId: number;
   maturityRating: string;
+  posterPath: string;
+  posterUrl: string;
+  backdropPath: string;
+  backdropUrl: string;
   recommendationSources?: RecommendationSource[];
 }
 
@@ -47,14 +52,34 @@ export interface ModelContribution {
 }
 
 export interface UserProfile {
+  userId: number;
   id: string;
-  name: string;
+  displayName: string;
   initials: string;
   avatarColor: string;
+  historySummary: string;
   favoriteGenres: GenreStat[];
   totalWatched: number;
   memberSince: string;
+  avgRating: number;
+  activeModels: number;
+  recentActivity: number;
   modelContributions: ModelContribution[];
+  recentMovies: Movie[];
+  topRatedMovies: Movie[];
+  summaryStats: Array<{
+    label: string;
+    value: string;
+  }>;
+}
+
+export interface UserOption {
+  userId: number;
+  displayName: string;
+  initials: string;
+  avatarColor: string;
+  historySummary: string;
+  favoriteGenres: GenreStat[];
 }
 
 export interface SearchState {
