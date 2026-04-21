@@ -5,6 +5,7 @@ __pycache__/
 .DS_Store
 frontend/node_modules/
 ml-20m/
+.env
 
 # Processed data (large, reproducible from raw)
 data/processed/
