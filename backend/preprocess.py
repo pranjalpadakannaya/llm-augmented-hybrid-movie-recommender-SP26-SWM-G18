@@ -49,7 +49,7 @@ def _load(name: str, **kwargs) -> pd.DataFrame:
 
 def main() -> None:
     print("=" * 60)
-    print("CineAI — MovieLens 20M Preprocessing Pipeline")
+    print("Popcorn — MovieLens 20M Preprocessing Pipeline")
     print("=" * 60)
     print(f"  Raw data : {RAW_DIR}")
     print(f"  Output   : {PROCESSED_DIR}")

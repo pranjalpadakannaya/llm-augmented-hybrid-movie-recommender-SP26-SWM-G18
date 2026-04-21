@@ -6,6 +6,11 @@ __pycache__/
 frontend/node_modules/
 ml-20m/
 .env
+# Ollama Models
+.ollama/models/
+/usr/share/ollama/.ollama/models/
+C:/**/.ollama/models/
+.claude
 
 # Processed data (large, reproducible from raw)
 data/processed/

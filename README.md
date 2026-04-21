@@ -104,20 +104,14 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Run preprocessing (once):
+Run preprocessing (once, from the repo root or from `backend/` as shown by the script docs):
 ```bash
 python preprocess.py
 ```
 
-Fetch TMDB metadata (once, requires `TMDB_READ_TOKEN`):
+Fetch TMDB metadata after preprocessing (once, or re-run any time you want to refresh/enrich metadata):
 ```bash
-TMDB_READ_TOKEN=<your_token> python -m backend.preprocessing.tmdb_fetch
-```
-
-Start the API server:
-```bash
-uvicorn backend.api:app --reload
-# API available at http://localhost:8000
+python -m backend.preprocessing.tmdb_fetch
 ```
 
 ### 3. LLM (optional but recommended)
@@ -130,7 +124,22 @@ ollama serve          # runs on http://localhost:11434 by default
 
 The backend falls back gracefully if Ollama is unavailable — search still works, just without LLM-parsed intent or per-movie explanations.
 
-### 4. Frontend
+### 4. Start the backend
+
+```bash
+uvicorn backend.api:app --reload
+# API available at http://localhost:8000
+```
+
+On startup, the backend loads:
+- `data/processed/movies.parquet`
+- `data/processed/ratings.parquet`
+- `data/processed/links.parquet`
+- `data/processed/tmdb_metadata.parquet` if present
+
+It also warms the recommendation models, so the frontend may show a loading state until `/api/health` reports ready.
+
+### 5. Frontend
 
 ```bash
 cd frontend
@@ -138,7 +147,55 @@ npm install
 npm run dev           # dev server at http://localhost:5173
 ```
 
-The Vite dev server proxies all `/api` requests to `http://localhost:8000`. Start the backend first for real data; the frontend falls back to mock data if the API is unreachable.
+The Vite dev server proxies all `/api` requests to `http://localhost:8000`. Start the backend first. The frontend now expects backend data and no longer uses mock movie/demo fallbacks.
+
+### Recommended run order
+
+For a fresh setup:
+
+```bash
+# 1. Install backend dependencies
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Build processed MovieLens artifacts
+python preprocess.py
+
+# 3. Enrich with TMDB metadata
+python -m backend.preprocessing.tmdb_fetch
+
+# 4. In another terminal, start Ollama
+ollama pull phi3:mini
+ollama serve
+
+# 5. Start the backend API
+uvicorn backend.api:app --reload
+
+# 6. In another terminal, start the frontend
+cd frontend
+npm install
+npm run dev
+```
+
+For normal daily development after setup:
+
+```bash
+# terminal 1
+ollama serve
+
+# terminal 2
+cd backend
+source .venv/bin/activate
+uvicorn backend.api:app --reload
+
+# terminal 3
+cd frontend
+npm run dev
+```
+
+Only re-run `python -m backend.preprocessing.tmdb_fetch` when you need to create or refresh `data/processed/tmdb_metadata.parquet`.
 
 ---
 
@@ -175,18 +232,19 @@ data/processed/
 
 ### TMDB Metadata Fetch
 
-Enriches each movie with overview, cast, director, keywords, runtime, and poster path. Run after preprocessing:
+Enriches each movie with overview, cast, director, keywords, runtime, poster path, backdrop path, and certification. Run after preprocessing:
 
 ```bash
-TMDB_READ_TOKEN=<token> python -m backend.preprocessing.tmdb_fetch
+python -m backend.preprocessing.tmdb_fetch
 ```
 
 - Reads `data/processed/links.parquet` for the movieId ↔ tmdbId mapping
 - Writes `data/processed/tmdb_metadata.parquet`
 - Resumable — already-fetched rows are skipped on re-run
 - Rate-limited to 40 concurrent requests (TMDB free-tier safe)
+- Reads `TMDB_READ_TOKEN` from `.env`
 
-Once this file exists, the API and Knowledge Graph automatically use richer cast/director/keyword data.
+Once this file exists, the API and Knowledge Graph automatically use richer cast/director/keyword data, and the frontend can display TMDB-backed posters, backdrops, overview text, runtime, cast, director, and maturity ratings.
 
 ---
 
