@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import hashlib
 import re
 import threading
@@ -26,11 +27,40 @@ except ImportError:
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data" / "processed"
+TMDB_POSTER_BASE = "https://image.tmdb.org/t/p/w500"
+TMDB_BACKDROP_BASE = "https://image.tmdb.org/t/p/w1280"
+GENRE_PALETTE = [
+    "#4FC3F7",
+    "#EF5350",
+    "#FFD54F",
+    "#69F0AE",
+    "#CE93D8",
+    "#FF8A65",
+]
+MODEL_META = {
+    "OCCF": {
+        "label": "Collaborative Filtering",
+        "description": "Long-term taste patterns learned from your rating history.",
+        "color": "#3B82F6",
+    },
+    "KnowledgeGraph": {
+        "label": "Knowledge Graph",
+        "description": "Semantic links across genres, cast, directors, and TMDB keywords.",
+        "color": "#8B5CF6",
+    },
+    "GRU4Rec": {
+        "label": "Session-Based",
+        "description": "Short-term sequence modeling from the order of your recent watches.",
+        "color": "#10B981",
+    },
+}
 
 _recommender: Optional[HybridRecommender] = None
 _movies_df: Optional[pd.DataFrame] = None
 _links_df: Optional[pd.DataFrame] = None
 _tmdb_df: Optional[pd.DataFrame] = None
+_ratings_df: Optional[pd.DataFrame] = None
+_user_profiles_cache: dict[int, dict] = {}
 _ready = False
 _status = "initializing"
 
@@ -54,18 +84,53 @@ def _parse_title(raw: str) -> tuple[str, int]:
     return raw.strip(), 0
 
 
+def _coerce_genres(value) -> list[str]:
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip() and str(v).strip() != "(no genres listed)"]
+
+    if value is None:
+        return []
+
+    raw = str(value).strip()
+    if not raw:
+        return []
+
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw.strip("[]").replace("'", "").replace('"', "")
+        parts = [p.strip() for p in raw.split(",")]
+    else:
+        parts = [p.strip() for p in raw.split("|")]
+
+    return [p for p in parts if p and p != "(no genres listed)"]
+
+
+def _image_url(path: str, base: str) -> str:
+    clean = (path or "").strip()
+    if not clean:
+        return ""
+    return f"{base}{clean}"
+
+
+def _avatar_color(user_id: int) -> str:
+    palette = ["#E50914", "#EF5350", "#F59E0B", "#10B981", "#3B82F6", "#8B5CF6"]
+    return palette[user_id % len(palette)]
+
+
+def _initials(name: str) -> str:
+    parts = [p[0] for p in name.split() if p]
+    return "".join(parts[:2]).upper() or "MV"
+
+
 def _meta(movie_id: int) -> dict:
     title, year, genres, tmdb_id = f"Movie {movie_id}", 0, [], 0
     overview, director, cast, runtime, rating = "", "", [], 0, 0.0
+    poster_path, backdrop_path, maturity_rating = "", "", "NR"
 
     if _movies_df is not None:
         row = _movies_df[_movies_df["movieId"] == movie_id]
         if not row.empty:
             title, year = _parse_title(str(row.iloc[0].get("title", "")))
-            genres = [
-                g for g in str(row.iloc[0].get("genres", "")).split("|")
-                if g and g != "(no genres listed)"
-            ]
+            genres = _coerce_genres(row.iloc[0].get("genres", []))
 
     if _links_df is not None:
         link = _links_df[_links_df["movieId"] == movie_id]
@@ -91,14 +156,18 @@ def _meta(movie_id: int) -> dict:
                 rating = round(float(r.get("vote_average") or 0.0), 1)
             except (ValueError, TypeError):
                 rating = 0.0
+            poster_path = str(r.get("poster_path") or "").strip()
+            backdrop_path = str(r.get("backdrop_path") or "").strip()
+            maturity_rating = str(r.get("certification") or "").strip() or "NR"
             if not genres:
-                genre_raw = str(r.get("genre_names") or "")
-                genres = [g.strip() for g in genre_raw.split("|") if g.strip()]
+                genres = _coerce_genres(r.get("genre_names", ""))
 
     return {
         "title": title, "year": year, "genres": genres, "tmdb_id": tmdb_id,
         "overview": overview, "director": director, "cast": cast,
         "runtime": runtime, "rating": rating,
+        "poster_path": poster_path, "backdrop_path": backdrop_path,
+        "maturity_rating": maturity_rating,
     }
 
 
@@ -146,9 +215,167 @@ def _to_movie(rec: dict, explanation: str = "") -> dict:
         "director": m["director"],
         "cast": m["cast"],
         "tmdbId": m["tmdb_id"],
-        "maturityRating": "NR",
+        "maturityRating": m["maturity_rating"],
+        "posterPath": m["poster_path"],
+        "posterUrl": _image_url(m["poster_path"], TMDB_POSTER_BASE),
+        "backdropPath": m["backdrop_path"],
+        "backdropUrl": _image_url(m["backdrop_path"], TMDB_BACKDROP_BASE),
         "recommendationSources": sources,
         "score": round(float(rec.get("score", 0)), 4),
+    }
+
+
+def _movie_for_profile(movie_id: int, user_rating: Optional[float] = None) -> dict:
+    movie = _to_movie({"movieId": movie_id, "score": 0.0, "sources": []})
+    if user_rating is not None:
+        movie["userRating"] = round(float(user_rating), 1)
+    return movie
+
+
+def _format_member_since(timestamp: Optional[float]) -> str:
+    if not timestamp:
+        return "Unknown"
+    return datetime.fromtimestamp(float(timestamp), tz=timezone.utc).strftime("%B %Y")
+
+
+def _preferred_era(years: list[int]) -> str:
+    valid = [y for y in years if y > 0]
+    if not valid:
+        return "Unknown"
+
+    buckets: dict[str, int] = {}
+    for year in valid:
+        decade = (year // 10) * 10
+        label = f"{decade}s"
+        buckets[label] = buckets.get(label, 0) + 1
+
+    return max(buckets.items(), key=lambda item: item[1])[0]
+
+
+def _profile_genres(user_movies: pd.DataFrame) -> list[dict]:
+    counts: dict[str, int] = {}
+    for _, row in user_movies.iterrows():
+        for genre in _coerce_genres(row.get("genres", [])):
+            counts[genre] = counts.get(genre, 0) + 1
+
+    total = sum(counts.values())
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+    return [
+        {
+            "genre": genre,
+            "percentage": round((count / total) * 100) if total else 0,
+            "color": GENRE_PALETTE[i % len(GENRE_PALETTE)],
+        }
+        for i, (genre, count) in enumerate(ranked)
+    ]
+
+
+def _profile_top_director(movie_ids: list[int]) -> str:
+    counts: dict[str, int] = {}
+    for movie_id in movie_ids:
+        director = _meta(int(movie_id))["director"]
+        if director:
+            counts[director] = counts.get(director, 0) + 1
+    if not counts:
+        return "Unknown"
+    return max(counts.items(), key=lambda item: item[1])[0]
+
+
+def _history_summary(favorite_genres: list[dict], top_director: str) -> str:
+    genres = [g["genre"] for g in favorite_genres[:2]]
+    if len(genres) == 2:
+        genre_text = f"{genres[0]} and {genres[1]}"
+    elif genres:
+        genre_text = genres[0]
+    else:
+        genre_text = "mixed genres"
+
+    if top_director != "Unknown":
+        return f"Leans toward {genre_text}, often overlapping with {top_director} titles."
+    return f"Leans toward {genre_text} based on ratings history."
+
+
+def _build_profile(user_id: int, recent_n: int = 6, top_n: int = 5) -> dict:
+    ratings_df = _recommender.ratings_df if _recommender is not None and _recommender.ratings_df is not None else _ratings_df
+    if ratings_df is None:
+        raise HTTPException(503, "Ratings not loaded")
+
+    user_ratings = ratings_df[ratings_df["userId"] == user_id].copy()
+    if user_ratings.empty:
+        raise HTTPException(404, f"Unknown user: {user_id}")
+
+    if "timestamp" in user_ratings.columns:
+        user_ratings = user_ratings.sort_values("timestamp")
+
+    deduped = user_ratings.drop_duplicates(subset=["movieId"], keep="last").copy()
+    total_watched = int(deduped["movieId"].nunique())
+    avg_rating = round(float(user_ratings["rating"].mean()), 1)
+    recent_activity = int((user_ratings["timestamp"] >= (user_ratings["timestamp"].max() - 30 * 24 * 60 * 60)).sum()) if "timestamp" in user_ratings.columns else len(user_ratings)
+
+    if _movies_df is not None:
+        user_movies = deduped.merge(_movies_df[["movieId", "title", "year", "genres"]], on="movieId", how="left")
+    else:
+        user_movies = deduped.copy()
+        user_movies["year"] = 0
+        user_movies["genres"] = [[] for _ in range(len(user_movies))]
+
+    recent_rows = deduped.sort_values("timestamp", ascending=False).head(recent_n) if "timestamp" in deduped.columns else deduped.tail(recent_n)
+    top_rows = deduped.sort_values(["rating", "timestamp"], ascending=[False, False]).head(top_n) if "timestamp" in deduped.columns else deduped.sort_values("rating", ascending=False).head(top_n)
+
+    favorite_genres = _profile_genres(user_movies)
+    top_director = _profile_top_director(deduped["movieId"].astype(int).tolist())
+    preferred_era = _preferred_era([int(y) for y in user_movies.get("year", pd.Series(dtype=int)).fillna(0).tolist()])
+    favorite_theme = favorite_genres[0]["genre"] if favorite_genres else "Unknown"
+
+    recent_movies = [
+        _movie_for_profile(int(row.movieId), user_rating=float(row.rating))
+        for row in recent_rows.itertuples(index=False)
+    ]
+    top_rated_movies = [
+        _movie_for_profile(int(row.movieId), user_rating=float(row.rating))
+        for row in top_rows.itertuples(index=False)
+    ]
+
+    display_name = f"User {user_id}"
+    contributions = []
+    weights = _recommender.base_weights if _recommender is not None else MODEL_META.keys()
+    iterable = weights.items() if isinstance(weights, dict) else [(model, {"OCCF": 0.4, "GRU4Rec": 0.3, "KnowledgeGraph": 0.3}[model]) for model in weights]
+    for model, weight in iterable:
+        meta = MODEL_META.get(model)
+        if not meta:
+            continue
+        contributions.append(
+            {
+                "model": model,
+                "label": meta["label"],
+                "percentage": round(weight * 100),
+                "color": meta["color"],
+                "description": meta["description"],
+            }
+        )
+
+    return {
+        "userId": user_id,
+        "id": f"u-{user_id:04d}",
+        "displayName": display_name,
+        "initials": _initials(display_name),
+        "avatarColor": _avatar_color(user_id),
+        "favoriteGenres": favorite_genres,
+        "totalWatched": total_watched,
+        "memberSince": _format_member_since(float(user_ratings["timestamp"].min())) if "timestamp" in user_ratings.columns else "Unknown",
+        "avgRating": avg_rating,
+        "activeModels": len(contributions),
+        "recentActivity": recent_activity,
+        "modelContributions": contributions,
+        "recentMovies": recent_movies,
+        "topRatedMovies": top_rated_movies,
+        "summaryStats": [
+            {"label": "Preferred Era", "value": preferred_era},
+            {"label": "Top Director", "value": top_director},
+            {"label": "Favorite Genre", "value": favorite_theme},
+            {"label": "Recent Activity", "value": f"{recent_activity} ratings / 30d"},
+        ],
+        "historySummary": _history_summary(favorite_genres, top_director),
     }
 
 
@@ -170,8 +397,9 @@ def _wrap_model(recs: list[dict], model_name: str, n: int) -> list[dict]:
 
 
 def _load() -> None:
-    global _recommender, _movies_df, _links_df, _tmdb_df, _ready, _status
+    global _recommender, _movies_df, _links_df, _tmdb_df, _ratings_df, _user_profiles_cache, _ready, _status
     try:
+        _user_profiles_cache = {}
         _status = "loading metadata"
         if (DATA_DIR / "movies.parquet").exists():
             _movies_df = pd.read_parquet(DATA_DIR / "movies.parquet")
@@ -179,6 +407,8 @@ def _load() -> None:
             _links_df = pd.read_parquet(DATA_DIR / "links.parquet")
         if (DATA_DIR / "tmdb_metadata.parquet").exists():
             _tmdb_df = pd.read_parquet(DATA_DIR / "tmdb_metadata.parquet")
+        if (DATA_DIR / "ratings.parquet").exists():
+            _ratings_df = pd.read_parquet(DATA_DIR / "ratings.parquet")
 
         _status = "training models (this takes a few minutes on first run)"
         _recommender = HybridRecommender()
@@ -289,10 +519,66 @@ def movie_detail(movie_id: int):
         "director": m["director"],
         "cast": m["cast"],
         "tmdbId": m["tmdb_id"],
-        "maturityRating": "NR",
+        "maturityRating": m["maturity_rating"],
+        "posterPath": m["poster_path"],
+        "posterUrl": _image_url(m["poster_path"], TMDB_POSTER_BASE),
+        "backdropPath": m["backdrop_path"],
+        "backdropUrl": _image_url(m["backdrop_path"], TMDB_BACKDROP_BASE),
         "recommendationSources": [],
         "score": 0.0,
     }
+
+
+@app.get("/api/profile")
+def profile(user_id: int = 1, recent_n: int = 6, top_n: int = 5):
+    _require_ready()
+    return _build_profile(user_id=user_id, recent_n=recent_n, top_n=top_n)
+
+
+@app.get("/api/users")
+def users(limit: int = 8):
+    ratings_df = _recommender.ratings_df if _recommender is not None and _recommender.ratings_df is not None else _ratings_df
+    if ratings_df is None:
+        raise HTTPException(503, "Ratings not loaded")
+
+    counts = (
+        ratings_df.groupby("userId").size().sort_values(ascending=False)
+    )
+    selected_ids: list[int] = []
+    genre_seen: set[str] = set()
+
+    for user_id in counts.index.astype(int).tolist():
+        try:
+            profile = _user_profiles_cache.get(user_id)
+            if profile is None:
+                profile = _build_profile(user_id=user_id, recent_n=3, top_n=3)
+                _user_profiles_cache[user_id] = profile
+        except HTTPException:
+            continue
+
+        favorite = profile.get("favoriteGenres", [])
+        primary = favorite[0]["genre"] if favorite else "Unknown"
+        if primary not in genre_seen or len(selected_ids) < max(limit // 2, 1):
+            selected_ids.append(user_id)
+            genre_seen.add(primary)
+        if len(selected_ids) >= limit:
+            break
+
+    results = []
+    for user_id in selected_ids[:limit]:
+        profile = _user_profiles_cache[user_id]
+        results.append(
+            {
+                "userId": profile["userId"],
+                "displayName": profile["displayName"],
+                "initials": profile["initials"],
+                "avatarColor": profile["avatarColor"],
+                "historySummary": profile["historySummary"],
+                "favoriteGenres": profile["favoriteGenres"][:2],
+            }
+        )
+
+    return {"users": results}
 
 
 @app.get("/api/search")

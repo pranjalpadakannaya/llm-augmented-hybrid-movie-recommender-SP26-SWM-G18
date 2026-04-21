@@ -20,6 +20,12 @@ from pathlib import Path
 import pandas as pd
 
 try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+except ImportError:
+    pass
+
+try:
     import httpx
 except ImportError:
     sys.exit("Install httpx first:  pip install httpx")
@@ -38,7 +44,7 @@ async def _fetch_one(
     sem: asyncio.Semaphore,
 ) -> dict | None:
     async with sem:
-        url = f"{BASE_URL}/movie/{tmdb_id}?append_to_response=credits,keywords"
+        url = f"{BASE_URL}/movie/{tmdb_id}?append_to_response=credits,keywords,release_dates"
         headers = {"Authorization": f"Bearer {token}"}
         try:
             r = await client.get(url, headers=headers, timeout=15)
@@ -59,6 +65,20 @@ def _extract(data: dict, movielens_id: int) -> dict:
     genre_names = [g["name"] for g in data.get("genres", [])]
     companies = [c["name"] for c in data.get("production_companies", [])[:5]]
 
+    certification = ""
+    release_dates = data.get("release_dates", {}).get("results", [])
+    us_entry = next((r for r in release_dates if r.get("iso_3166_1") == "US"), None)
+    candidates = (us_entry or {}).get("release_dates", []) if us_entry else []
+    certification = next((str(r.get("certification") or "").strip() for r in candidates if str(r.get("certification") or "").strip()), "")
+    if not certification:
+        for country in release_dates:
+            certification = next(
+                (str(r.get("certification") or "").strip() for r in country.get("release_dates", []) if str(r.get("certification") or "").strip()),
+                "",
+            )
+            if certification:
+                break
+
     return {
         "movieId": movielens_id,
         "tmdbId": data.get("id"),
@@ -72,6 +92,8 @@ def _extract(data: dict, movielens_id: int) -> dict:
         "vote_average": float(data.get("vote_average") or 0.0),
         "popularity": float(data.get("popularity") or 0.0),
         "poster_path": str(data.get("poster_path") or ""),
+        "backdrop_path": str(data.get("backdrop_path") or ""),
+        "certification": certification,
         "production_companies": "|".join(companies),
     }
 
