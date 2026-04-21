@@ -14,10 +14,20 @@ export default function HeroBanner({ movies }: Props) {
   const [muted, setMuted] = useState(true);
   const navigate = useNavigate();
 
-  const movie = movies[current];
+  if (movies.length === 0) {
+    return null;
+  }
+
+  const safeIndex = current % movies.length;
+  const movie = movies[safeIndex];
+
+  useEffect(() => {
+    setCurrent(0);
+  }, [movies.length]);
 
   // Auto-advance hero
   useEffect(() => {
+    if (movies.length < 2) return;
     const timer = setInterval(() => {
       setCurrent((c) => (c + 1) % movies.length);
     }, 8000);
@@ -46,6 +56,20 @@ export default function HeroBanner({ movies }: Props) {
           }}
         />
       </AnimatePresence>
+      {movie.backdropUrl && (
+        <AnimatePresence mode="wait">
+          <motion.img
+            key={`backdrop-${movie.id}`}
+            src={movie.backdropUrl}
+            alt={movie.title}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 0.4 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.8 }}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        </AnimatePresence>
+      )}
 
       {/* Cinematic vignette overlays */}
       <div className="absolute inset-0 bg-gradient-to-r from-[#0f0f0f] via-[#0f0f0f]/60 to-transparent" />
@@ -102,7 +126,7 @@ export default function HeroBanner({ movies }: Props) {
             <div className="flex items-center gap-3 mb-5">
               <span className="text-emerald-400 font-bold text-sm">{Math.round(movie.rating * 10)}% Match</span>
               <span className="text-[#888] text-sm">{movie.year}</span>
-              <span className="text-[#888] text-sm">{movie.runtime}m</span>
+              {movie.runtime > 0 && <span className="text-[#888] text-sm">{movie.runtime}m</span>}
               <div className="flex gap-2">
                 {movie.genres.slice(0, 3).map((g) => (
                   <span key={g} className="text-xs text-[#aaa] border border-white/10 px-2 py-0.5 rounded">
@@ -114,7 +138,7 @@ export default function HeroBanner({ movies }: Props) {
 
             {/* Overview */}
             <p className="text-[#ccc] text-base leading-relaxed line-clamp-3 max-w-xl mb-8">
-              {movie.overview}
+              {movie.overview || 'Metadata loaded from the backend dataset and TMDB enrichment pipeline.'}
             </p>
 
             {/* Action buttons */}
@@ -143,8 +167,12 @@ export default function HeroBanner({ movies }: Props) {
             {/* Director credit */}
             <p className="mt-6 text-xs text-[#666]">
               Directed by <span className="text-[#aaa]">{movie.director}</span>
-              {' · '}
-              {movie.cast.slice(0, 3).join(', ')}
+              {movie.cast.length > 0 && (
+                <>
+                  {' · '}
+                  {movie.cast.slice(0, 3).join(', ')}
+                </>
+              )}
             </p>
           </motion.div>
         </AnimatePresence>
@@ -182,7 +210,7 @@ export default function HeroBanner({ movies }: Props) {
                 key={i}
                 onClick={() => setCurrent(i)}
                 className={`rounded-full transition-all duration-300 ${
-                  i === current ? 'w-6 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/30 hover:bg-white/60'
+                  i === safeIndex ? 'w-6 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/30 hover:bg-white/60'
                 }`}
               />
             ))}

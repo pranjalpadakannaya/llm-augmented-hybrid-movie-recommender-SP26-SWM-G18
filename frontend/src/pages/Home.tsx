@@ -3,7 +3,6 @@ import { motion } from 'framer-motion';
 import HeroBanner from '../components/HeroBanner';
 import MovieRow from '../components/MovieRow';
 import { checkHealth, fetchRecommendations } from '../api/client';
-import { MOVIES, HOME_ROWS } from '../data/mockData';
 import { Movie, RowConfig, ModelType } from '../types';
 
 const ROW_DEFS: Array<{
@@ -15,56 +14,60 @@ const ROW_DEFS: Array<{
   query?: string;
 }> = [
   {
-    id: 'top-picks',
-    title: 'Top Picks for You',
-    subtitle: 'Based on your long-term viewing history · OCCF Model',
-    apiModel: 'occf',
-    modelType: 'OCCF',
-  },
-  {
-    id: 'continue-session',
-    title: 'Continue Your Session',
-    subtitle: 'Next-item predictions from your watch pattern · GRU4Rec',
-    apiModel: 'gru4rec',
-    modelType: 'GRU4Rec',
-  },
-  {
-    id: 'semantic-matches',
-    title: 'Semantic Matches',
-    subtitle: 'Connections via Knowledge Graph · TMDB metadata',
-    apiModel: 'kg',
-    modelType: 'KnowledgeGraph',
-  },
-  {
-    id: 'trending',
-    title: 'Trending Now',
-    subtitle: 'Popular across all users this week',
-    apiModel: 'trending',
-    modelType: 'Trending',
-  },
-  {
-    id: 'hybrid-fusion',
-    title: 'Hybrid Fusion Picks',
-    subtitle: 'Unified ranking from all three models combined',
+    id: 'hybrid-picks',
+    title: 'Hybrid Picks For You',
+    subtitle: 'Fusion ranking across collaborative, session, and knowledge-graph signals',
     apiModel: 'hybrid',
     modelType: 'Hybrid',
   },
   {
-    id: 'sci-fi',
-    title: 'Sci-Fi Deep Cuts',
-    subtitle: 'Semantic cluster: science fiction & speculative worlds',
-    apiModel: 'kg',
-    modelType: 'KnowledgeGraph',
+    id: 'hybrid-sci-fi',
+    title: 'Hybrid Sci-Fi Picks',
+    subtitle: 'Fusion model boosted by a science-fiction query',
+    apiModel: 'hybrid',
+    modelType: 'Hybrid',
     query: 'science fiction space future artificial intelligence dystopia',
+  },
+  {
+    id: 'hybrid-thrillers',
+    title: 'Hybrid Thriller Picks',
+    subtitle: 'Fusion model boosted by suspense, crime, and psychological themes',
+    apiModel: 'hybrid',
+    modelType: 'Hybrid',
+    query: 'psychological thriller crime suspense mystery dark',
+  },
+  {
+    id: 'hybrid-drama',
+    title: 'Hybrid Drama Picks',
+    subtitle: 'Fusion model boosted by drama, emotion, and character-driven storytelling',
+    apiModel: 'hybrid',
+    modelType: 'Hybrid',
+    query: 'drama emotional character relationships award-winning',
+  },
+  {
+    id: 'hybrid-classics',
+    title: 'Hybrid Classics',
+    subtitle: 'Fusion model boosted by timeless, critically acclaimed cinema',
+    apiModel: 'hybrid',
+    modelType: 'Hybrid',
+    query: 'classic masterpiece iconic cinema all-time great',
+  },
+  {
+    id: 'hybrid-trending',
+    title: 'Hybrid Trending',
+    subtitle: 'Fusion model over popular and active taste signals',
+    apiModel: 'hybrid',
+    modelType: 'Hybrid',
+    query: 'popular trending widely loved recent favorites',
   },
 ];
 
-const MOCK_HERO: Movie[] = [MOVIES[1], MOVIES[6], MOVIES[9], MOVIES[0], MOVIES[3]];
-
-export default function Home() {
-  const [rows, setRows] = useState<RowConfig[]>(HOME_ROWS);
-  const [heroMovies, setHeroMovies] = useState<Movie[]>(MOCK_HERO);
+export default function Home({ userId }: { userId: number }) {
+  const [rows, setRows] = useState<RowConfig[]>([]);
+  const [heroMovies, setHeroMovies] = useState<Movie[]>([]);
   const [warming, setWarming] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -72,7 +75,7 @@ export default function Home() {
 
     async function loadData() {
       const results = await Promise.allSettled(
-        ROW_DEFS.map((def) => fetchRecommendations(def.apiModel, 1, 10, def.query)),
+        ROW_DEFS.map((def) => fetchRecommendations(def.apiModel, userId, 10, def.query)),
       );
       if (cancelled) return;
 
@@ -87,15 +90,24 @@ export default function Home() {
             movies: r.value,
           };
         }
-        return HOME_ROWS[i] ?? HOME_ROWS[0];
-      });
+        return null;
+      }).filter((row): row is RowConfig => row !== null);
 
       setRows(newRows);
 
       const hybridResult = results[4];
       if (hybridResult.status === 'fulfilled' && hybridResult.value.length >= 5) {
         setHeroMovies(hybridResult.value.slice(0, 5));
+      } else if (newRows.length > 0) {
+        setHeroMovies(newRows[0].movies.slice(0, 5));
       }
+
+      if (newRows.length === 0) {
+        setError('The backend did not return any recommendation rows.');
+      } else {
+        setError('');
+      }
+      setLoading(false);
     }
 
     async function init() {
@@ -119,7 +131,10 @@ export default function Home() {
         }
         await loadData();
       } catch {
-        // API unavailable — keep mock data
+        if (!cancelled) {
+          setError('The frontend could not reach the backend API.');
+          setLoading(false);
+        }
       }
     }
 
@@ -128,7 +143,7 @@ export default function Home() {
       cancelled = true;
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, []);
+  }, [userId]);
 
   return (
     <motion.div
@@ -144,7 +159,26 @@ export default function Home() {
         </div>
       )}
 
-      <HeroBanner movies={heroMovies} />
+      {heroMovies.length > 0 ? (
+        <HeroBanner movies={heroMovies} />
+      ) : (
+        <div className="min-h-[60vh] flex items-center justify-center px-6">
+          <div className="text-center max-w-md">
+            {loading || warming ? (
+              <>
+                <div className="w-10 h-10 border-2 border-[#E50914] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                <p className="text-white text-lg font-semibold">Loading recommendations</p>
+                <p className="text-[#777] text-sm mt-2">The homepage will populate once the backend finishes loading models and metadata.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-white text-lg font-semibold">No backend data available</p>
+                <p className="text-[#777] text-sm mt-2">{error || 'Start the backend and load the processed dataset to see recommendations here.'}</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 space-y-8 pb-16">
         {rows.map((row, index) => (

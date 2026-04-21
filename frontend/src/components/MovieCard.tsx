@@ -35,6 +35,14 @@ export default function MovieCard({ movie, size = 'md' }: Props) {
           background: `linear-gradient(160deg, ${movie.gradient[0]} 0%, ${movie.gradient[1]} 100%)`,
         }}
       >
+        {movie.posterUrl && (
+          <img
+            src={movie.posterUrl}
+            alt={movie.title}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        )}
+
         {/* Decorative background art */}
         <div className="absolute inset-0 opacity-30">
           <div
@@ -96,6 +104,13 @@ export default function MovieCard({ movie, size = 'md' }: Props) {
                 background: `linear-gradient(160deg, ${movie.gradient[0]} 0%, ${movie.gradient[1]} 100%)`,
               }}
             >
+              {movie.backdropUrl && (
+                <img
+                  src={movie.backdropUrl}
+                  alt={movie.title}
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              )}
               <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/60" />
               <div className="absolute bottom-2 left-3">
                 <p className="text-white font-bold text-sm">{movie.title}</p>

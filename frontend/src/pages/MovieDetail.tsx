@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Play, Plus, ArrowLeft, Star, Clock, Calendar, Film, Share2, Info } from 'lucide-react';
-import { MOVIES } from '../data/mockData';
 import { Movie } from '../types';
 import RecommendationBadge from '../components/RecommendationBadge';
 import MovieCard from '../components/MovieCard';
@@ -24,48 +23,53 @@ const MODEL_LABELS: Record<string, string> = {
   Trending: 'Trending Signal',
 };
 
-export default function MovieDetail() {
+export default function MovieDetail({ userId }: { userId: number }) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { state } = useLocation() as { state?: { movie?: Movie } };
+  const routeMovie = state?.movie;
+  const numericId = Number(id);
 
-  const [movie, setMovie] = useState<Movie | null>(state?.movie ?? null);
+  const [movie, setMovie] = useState<Movie | null>(routeMovie?.id === numericId ? routeMovie : null);
   const [similar, setSimilar] = useState<Movie[]>([]);
-  const [loadingMovie, setLoadingMovie] = useState(!state?.movie);
+  const [loadingMovie, setLoadingMovie] = useState(true);
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [id]);
 
   useEffect(() => {
-    if (movie) return;
-    const numId = Number(id);
+    let cancelled = false;
+    setLoadingMovie(true);
+    setSimilar([]);
 
-    // Try mock data first (IDs 1–20)
-    const mock = MOVIES.find((m) => m.id === numId);
-    if (mock) {
-      setMovie(mock);
+    if (routeMovie?.id === numericId) {
+      setMovie(routeMovie);
       setLoadingMovie(false);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
-    // Fetch from API
-    fetchMovieById(numId)
+    fetchMovieById(numericId)
       .then((m) => setMovie(m))
       .catch(() => setMovie(null))
-      .finally(() => setLoadingMovie(false));
-  }, [id, movie]);
+      .finally(() => {
+        if (!cancelled) setLoadingMovie(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [numericId, routeMovie]);
 
   // Fetch similar movies via KG once we know the movie title
   useEffect(() => {
     if (!movie?.title) return;
-    fetchRecommendations('kg', 1, 8, movie.title)
+    fetchRecommendations('hybrid', userId, 8, movie.title)
       .then((movies) => setSimilar(movies.filter((m) => m.id !== movie.id).slice(0, 8)))
-      .catch(() => {
-        // fallback: pick from mock
-        setSimilar(MOVIES.filter((m) => m.id !== movie.id).slice(0, 8));
-      });
-  }, [movie]);
+      .catch(() => setSimilar([]));
+  }, [movie, userId]);
 
   if (loadingMovie) {
     return (
@@ -109,6 +113,13 @@ export default function MovieDetail() {
             `,
           }}
         />
+        {movie.backdropUrl && (
+          <img
+            src={movie.backdropUrl}
+            alt={movie.title}
+            className="absolute inset-0 w-full h-full object-cover opacity-35"
+          />
+        )}
         <div className="absolute inset-0 bg-gradient-to-r from-[#0f0f0f] via-[#0f0f0f]/50 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-t from-[#0f0f0f] via-transparent to-[#0f0f0f]/40" />
 
@@ -139,6 +150,13 @@ export default function MovieDetail() {
                 background: `linear-gradient(160deg, ${movie.gradient[0]} 0%, ${movie.gradient[1]} 100%)`,
               }}
             >
+              {movie.posterUrl && (
+                <img
+                  src={movie.posterUrl}
+                  alt={movie.title}
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              )}
               <div
                 className="absolute top-0 left-0 right-0 h-1"
                 style={{ background: movie.accentColor }}
@@ -316,7 +334,7 @@ export default function MovieDetail() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <h2 className="text-lg font-bold text-white mb-4">More Like This</h2>
+            <h2 className="text-lg font-bold text-white mb-4">More Like This From Hybrid Fusion</h2>
             <div className="flex gap-4 overflow-x-auto hide-scrollbar pb-4">
               {similar.map((m) => (
                 <MovieCard key={m.id} movie={m} size="md" />
