@@ -209,6 +209,85 @@ class HybridRecommender:
         }
 
 
+    def tune_weights(
+        self,
+        ratings_df: pd.DataFrame,
+        val_users: list[int],
+        k: int = 10,
+        step: float = 0.1,
+    ) -> dict[str, float]:
+        """Grid-search fusion weights to maximise NDCG@k on val_users.
+
+        Tries all (occf, gru, kg) weight triples that sum to 1.0 (step granularity).
+        Updates self.base_weights in-place and returns the best weights found.
+        """
+        try:
+            from evaluation.metrics import ndcg_at_k
+        except ImportError:
+            from backend.evaluation.metrics import ndcg_at_k
+
+        # Build ground truth from last 20% of each validation user's ratings
+        test_map: dict[int, set[int]] = {}
+        for uid in val_users:
+            user_ratings = ratings_df[ratings_df["userId"] == uid]
+            if "timestamp" in user_ratings.columns:
+                user_ratings = user_ratings.sort_values("timestamp")
+            n = len(user_ratings)
+            split = max(1, int(n * 0.8))
+            held = set(user_ratings.iloc[split:]["movieId"].astype(int).tolist())
+            if held:
+                test_map[uid] = held
+
+        if not test_map:
+            return self.base_weights.copy()
+
+        # Pre-fetch candidates for all val users
+        pool = k * 3
+        occf_cache: dict[int, list[dict]] = {}
+        gru_cache: dict[int, list[dict]] = {}
+        kg_cache: dict[int, list[dict]] = {}
+        for uid in test_map:
+            occf_cache[uid] = self.occf.recommend(uid, N=pool)
+            history = self._get_history(uid)
+            gru_cache[uid] = (
+                self.gru.recommend_from_history(history, N=pool)
+                if history
+                else self.gru.recommend_for_user(uid, N=pool)
+            )
+            h5 = self._get_history(uid, limit=5)
+            kg_cache[uid] = (
+                self.kg.recommend_from_history(h5, N=pool)
+                if h5
+                else self.kg.recommend_from_query("popular", N=pool)
+            )
+
+        values = [round(i * step, 2) for i in range(int(1 / step) + 1)]
+        best_score = -1.0
+        best_weights = self.base_weights.copy()
+
+        for w_occf in values:
+            for w_gru in values:
+                w_kg = round(1.0 - w_occf - w_gru, 2)
+                if w_kg < 0 or w_kg > 1.0 + 1e-9:
+                    continue
+                trial = {"OCCF": w_occf, "GRU4Rec": w_gru, "KnowledgeGraph": max(0.0, w_kg)}
+                self.base_weights = trial
+
+                ndcgs = []
+                for uid, rel in test_map.items():
+                    fused = self._fuse(occf_cache[uid], gru_cache[uid], kg_cache[uid], N=k)
+                    recs = [int(r["movieId"]) for r in fused]
+                    ndcgs.append(ndcg_at_k(recs, rel, k))
+
+                score = sum(ndcgs) / len(ndcgs)
+                if score > best_score:
+                    best_score = score
+                    best_weights = trial.copy()
+
+        self.base_weights = best_weights
+        return best_weights
+
+
 if __name__ == "__main__":
     hybrid = HybridRecommender()
     hybrid.load_models()
