@@ -1,9 +1,12 @@
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Play, Plus, ArrowLeft, Star, Clock, Calendar, Film, Share2, Info } from 'lucide-react';
-import { MOVIES, HOME_ROWS } from '../data/mockData';
+import { MOVIES } from '../data/mockData';
+import { Movie } from '../types';
 import RecommendationBadge from '../components/RecommendationBadge';
 import MovieCard from '../components/MovieCard';
+import { fetchMovieById, fetchRecommendations } from '../api/client';
 
 const MODEL_COLORS: Record<string, string> = {
   OCCF: '#3B82F6',
@@ -24,7 +27,56 @@ const MODEL_LABELS: Record<string, string> = {
 export default function MovieDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const movie = MOVIES.find((m) => m.id === Number(id));
+  const { state } = useLocation() as { state?: { movie?: Movie } };
+
+  const [movie, setMovie] = useState<Movie | null>(state?.movie ?? null);
+  const [similar, setSimilar] = useState<Movie[]>([]);
+  const [loadingMovie, setLoadingMovie] = useState(!state?.movie);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [id]);
+
+  useEffect(() => {
+    if (movie) return;
+    const numId = Number(id);
+
+    // Try mock data first (IDs 1–20)
+    const mock = MOVIES.find((m) => m.id === numId);
+    if (mock) {
+      setMovie(mock);
+      setLoadingMovie(false);
+      return;
+    }
+
+    // Fetch from API
+    fetchMovieById(numId)
+      .then((m) => setMovie(m))
+      .catch(() => setMovie(null))
+      .finally(() => setLoadingMovie(false));
+  }, [id, movie]);
+
+  // Fetch similar movies via KG once we know the movie title
+  useEffect(() => {
+    if (!movie?.title) return;
+    fetchRecommendations('kg', 1, 8, movie.title)
+      .then((movies) => setSimilar(movies.filter((m) => m.id !== movie.id).slice(0, 8)))
+      .catch(() => {
+        // fallback: pick from mock
+        setSimilar(MOVIES.filter((m) => m.id !== movie.id).slice(0, 8));
+      });
+  }, [movie]);
+
+  if (loadingMovie) {
+    return (
+      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-2 border-[#E50914] border-t-transparent rounded-full animate-spin" />
+          <p className="text-[#888] text-sm">Loading movie…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!movie) {
     return (
@@ -39,11 +91,6 @@ export default function MovieDetail() {
     );
   }
 
-  const similarMovies = HOME_ROWS
-    .flatMap((r) => r.movies)
-    .filter((m, idx, arr) => m.id !== movie.id && arr.findIndex((x) => x.id === m.id) === idx)
-    .slice(0, 8);
-
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -53,7 +100,6 @@ export default function MovieDetail() {
     >
       {/* Hero section */}
       <div className="relative h-[70vh] min-h-[500px] overflow-hidden">
-        {/* Background */}
         <div
           className="absolute inset-0"
           style={{
@@ -66,13 +112,11 @@ export default function MovieDetail() {
         <div className="absolute inset-0 bg-gradient-to-r from-[#0f0f0f] via-[#0f0f0f]/50 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-t from-[#0f0f0f] via-transparent to-[#0f0f0f]/40" />
 
-        {/* Accent orb */}
         <div
           className="absolute right-24 top-1/2 -translate-y-1/2 w-96 h-96 rounded-full blur-[120px] opacity-15 pointer-events-none"
           style={{ background: movie.accentColor }}
         />
 
-        {/* Back button */}
         <div className="absolute top-20 left-6 md:left-10 z-10">
           <button
             onClick={() => navigate(-1)}
@@ -83,7 +127,6 @@ export default function MovieDetail() {
           </button>
         </div>
 
-        {/* Content */}
         <div className="relative h-full flex items-end pb-16 px-6 md:px-10 max-w-screen-2xl mx-auto">
           <div className="flex gap-8 items-end w-full">
             {/* Poster card */}
@@ -91,17 +134,11 @@ export default function MovieDetail() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="hidden md:block shrink-0 w-48 h-72 rounded-xl overflow-hidden shadow-2xl border border-white/10"
+              className="hidden md:block shrink-0 w-48 h-72 rounded-xl overflow-hidden shadow-2xl border border-white/10 relative"
               style={{
                 background: `linear-gradient(160deg, ${movie.gradient[0]} 0%, ${movie.gradient[1]} 100%)`,
               }}
             >
-              <div className="absolute inset-0 opacity-40">
-                <div
-                  className="absolute top-4 right-4 w-16 h-16 rounded-full blur-xl"
-                  style={{ background: movie.accentColor }}
-                />
-              </div>
               <div
                 className="absolute top-0 left-0 right-0 h-1"
                 style={{ background: movie.accentColor }}
@@ -133,26 +170,35 @@ export default function MovieDetail() {
               </h1>
 
               <div className="flex flex-wrap items-center gap-4 mb-4 text-sm">
-                <div className="flex items-center gap-1.5 text-yellow-400 font-bold">
-                  <Star size={14} fill="currentColor" />
-                  {movie.rating}/10
-                </div>
-                <span className="text-emerald-400 font-bold">{Math.round(movie.rating * 10)}% Match</span>
-                <div className="flex items-center gap-1 text-[#aaa]">
-                  <Calendar size={13} />
-                  {movie.year}
-                </div>
-                <div className="flex items-center gap-1 text-[#aaa]">
-                  <Clock size={13} />
-                  {movie.runtime}m
-                </div>
-                <div className="flex items-center gap-1 text-[#aaa]">
-                  <Film size={13} />
-                  {movie.director}
-                </div>
+                {movie.rating > 0 && (
+                  <div className="flex items-center gap-1.5 text-yellow-400 font-bold">
+                    <Star size={14} fill="currentColor" />
+                    {movie.rating}/10
+                  </div>
+                )}
+                {movie.rating > 0 && (
+                  <span className="text-emerald-400 font-bold">{Math.round(movie.rating * 10)}% Match</span>
+                )}
+                {movie.year > 0 && (
+                  <div className="flex items-center gap-1 text-[#aaa]">
+                    <Calendar size={13} />
+                    {movie.year}
+                  </div>
+                )}
+                {movie.runtime > 0 && (
+                  <div className="flex items-center gap-1 text-[#aaa]">
+                    <Clock size={13} />
+                    {movie.runtime}m
+                  </div>
+                )}
+                {movie.director && (
+                  <div className="flex items-center gap-1 text-[#aaa]">
+                    <Film size={13} />
+                    {movie.director}
+                  </div>
+                )}
               </div>
 
-              {/* Genres */}
               <div className="flex flex-wrap gap-2 mb-5">
                 {movie.genres.map((g) => (
                   <span key={g} className="text-xs border border-white/15 text-[#bbb] px-3 py-1 rounded-full">
@@ -161,12 +207,12 @@ export default function MovieDetail() {
                 ))}
               </div>
 
-              {/* Overview */}
-              <p className="text-[#ccc] text-base leading-relaxed max-w-2xl mb-6">
-                {movie.overview}
-              </p>
+              {movie.overview && (
+                <p className="text-[#ccc] text-base leading-relaxed max-w-2xl mb-6">
+                  {movie.overview}
+                </p>
+              )}
 
-              {/* Actions */}
               <div className="flex flex-wrap gap-3">
                 <motion.button
                   whileHover={{ scale: 1.03 }}
@@ -196,23 +242,25 @@ export default function MovieDetail() {
       {/* Details section */}
       <div className="max-w-screen-2xl mx-auto px-6 md:px-10 py-10 space-y-12">
         {/* Cast */}
-        <motion.section
-          initial={{ opacity: 0, y: 16 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-        >
-          <h2 className="text-lg font-bold text-white mb-4">Cast</h2>
-          <div className="flex flex-wrap gap-3">
-            {movie.cast.map((name) => (
-              <div key={name} className="flex items-center gap-2 px-3 py-2 bg-[#1a1a1a] rounded-lg border border-white/10">
-                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#333] to-[#222] flex items-center justify-center text-[10px] font-bold text-[#888]">
-                  {name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+        {movie.cast.length > 0 && (
+          <motion.section
+            initial={{ opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+          >
+            <h2 className="text-lg font-bold text-white mb-4">Cast</h2>
+            <div className="flex flex-wrap gap-3">
+              {movie.cast.map((name) => (
+                <div key={name} className="flex items-center gap-2 px-3 py-2 bg-[#1a1a1a] rounded-lg border border-white/10">
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#333] to-[#222] flex items-center justify-center text-[10px] font-bold text-[#888]">
+                    {name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                  </div>
+                  <span className="text-sm text-[#ccc]">{name}</span>
                 </div>
-                <span className="text-sm text-[#ccc]">{name}</span>
-              </div>
-            ))}
-          </div>
-        </motion.section>
+              ))}
+            </div>
+          </motion.section>
+        )}
 
         {/* Why Recommended */}
         {movie.recommendationSources && movie.recommendationSources.length > 0 && (
@@ -244,7 +292,6 @@ export default function MovieDetail() {
                     </span>
                   </div>
                   <p className="text-xs text-[#888]">{MODEL_LABELS[src.model]}</p>
-                  {/* Score bar */}
                   <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
                     <motion.div
                       initial={{ width: 0 }}
@@ -263,18 +310,20 @@ export default function MovieDetail() {
         )}
 
         {/* More like this */}
-        <motion.section
-          initial={{ opacity: 0, y: 16 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-        >
-          <h2 className="text-lg font-bold text-white mb-4">More Like This</h2>
-          <div className="flex gap-4 overflow-x-auto hide-scrollbar pb-4">
-            {similarMovies.map((m) => (
-              <MovieCard key={m.id} movie={m} size="md" />
-            ))}
-          </div>
-        </motion.section>
+        {similar.length > 0 && (
+          <motion.section
+            initial={{ opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+          >
+            <h2 className="text-lg font-bold text-white mb-4">More Like This</h2>
+            <div className="flex gap-4 overflow-x-auto hide-scrollbar pb-4">
+              {similar.map((m) => (
+                <MovieCard key={m.id} movie={m} size="md" />
+              ))}
+            </div>
+          </motion.section>
+        )}
       </div>
     </motion.div>
   );

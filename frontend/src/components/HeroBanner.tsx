@@ -122,7 +122,7 @@ export default function HeroBanner({ movies }: Props) {
               <motion.button
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
-                onClick={() => navigate(`/movie/${movie.id}`)}
+                onClick={() => navigate(`/movie/${movie.id}`, { state: { movie } })}
                 className="flex items-center gap-2 px-7 py-3.5 bg-white text-black font-bold text-sm rounded-lg hover:bg-gray-100 transition-colors"
               >
                 <Play size={18} fill="currentColor" />
@@ -132,7 +132,7 @@ export default function HeroBanner({ movies }: Props) {
               <motion.button
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
-                onClick={() => navigate(`/movie/${movie.id}`)}
+                onClick={() => navigate(`/movie/${movie.id}`, { state: { movie } })}
                 className="flex items-center gap-2 px-7 py-3.5 bg-white/20 text-white font-semibold text-sm rounded-lg border border-white/20 hover:bg-white/30 transition-colors backdrop-blur-sm"
               >
                 <Info size={18} />

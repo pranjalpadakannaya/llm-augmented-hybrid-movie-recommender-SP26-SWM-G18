@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { Movie, ModelType } from '../types';
 import { MOVIES, ALL_GENRES, EXAMPLE_QUERIES } from '../data/mockData';
 import RecommendationBadge from '../components/RecommendationBadge';
+import { searchMovies, ParsedIntent } from '../api/client';
 
 const MODEL_FILTERS: { label: string; value: ModelType | 'All' }[] = [
   { label: 'All Models', value: 'All' },
@@ -66,6 +67,7 @@ export default function Search() {
   const [minRating, setMinRating] = useState(0);
   const [activeModel, setActiveModel] = useState<ModelType | 'All'>('All');
   const [showFilters, setShowFilters] = useState(false);
+  const [parsedIntent, setParsedIntent] = useState<ParsedIntent | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -76,14 +78,24 @@ export default function Search() {
     setIsInterpreting(true);
     setResults([]);
     setInterpretedQuery('');
+    setParsedIntent(null);
 
-    // Simulate LLM interpretation delay
-    await new Promise((r) => setTimeout(r, 900));
-    const { interpreted, filters, results: res } = simulateSearch(q);
-    setInterpretedQuery(interpreted);
-    setAppliedFilters(filters);
-    setIsInterpreting(false);
-    setResults(res);
+    try {
+      const data = await searchMovies(q);
+      setInterpretedQuery(data.interpreted);
+      setAppliedFilters(data.filters);
+      setParsedIntent(data.parsedIntent ?? null);
+      setResults(data.movies);
+    } catch {
+      // API unavailable — fall back to local simulation
+      await new Promise((r) => setTimeout(r, 900));
+      const { interpreted, filters, results: res } = simulateSearch(q);
+      setInterpretedQuery(interpreted);
+      setAppliedFilters(filters);
+      setResults(res);
+    } finally {
+      setIsInterpreting(false);
+    }
   };
 
   const filteredResults = results
@@ -208,11 +220,35 @@ export default function Search() {
                       <span className="text-sm text-[#888]">Interpreting your query with LLM...</span>
                     </div>
                   ) : (
-                    <p className="text-sm text-[#ddd]">
+                    <p className="text-sm text-[#ddd] mb-2">
                       "{interpretedQuery}"
                     </p>
                   )}
-                  {appliedFilters.length > 0 && !isInterpreting && (
+                  {!isInterpreting && parsedIntent && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {parsedIntent.genres.map((g) => (
+                        <span key={g} className="text-xs bg-blue-500/15 text-blue-300 border border-blue-500/25 px-2 py-0.5 rounded">
+                          🎬 {g}
+                        </span>
+                      ))}
+                      {parsedIntent.mood && (
+                        <span className="text-xs bg-purple-500/15 text-purple-300 border border-purple-500/25 px-2 py-0.5 rounded">
+                          ✨ {parsedIntent.mood}
+                        </span>
+                      )}
+                      {parsedIntent.seed_movies.map((m) => (
+                        <span key={m} className="text-xs bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 px-2 py-0.5 rounded">
+                          🎥 {m}
+                        </span>
+                      ))}
+                      {parsedIntent.keywords.map((k) => (
+                        <span key={k} className="text-xs bg-amber-500/15 text-amber-300 border border-amber-500/25 px-2 py-0.5 rounded">
+                          # {k}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {appliedFilters.length > 0 && !isInterpreting && !parsedIntent && (
                     <div className="flex flex-wrap gap-2 mt-2">
                       {appliedFilters.map((f) => (
                         <span key={f} className="text-xs bg-amber-500/15 text-amber-300 border border-amber-500/25 px-2 py-0.5 rounded">
@@ -350,7 +386,7 @@ export default function Search() {
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.04 }}
-                  onClick={() => navigate(`/movie/${movie.id}`)}
+                  onClick={() => navigate(`/movie/${movie.id}`, { state: { movie } })}
                   className="cursor-pointer group"
                 >
                   {/* Poster */}
