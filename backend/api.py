@@ -7,6 +7,7 @@ from typing import Optional
 import hashlib
 import re
 import threading
+import time
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -64,6 +65,8 @@ _links_df: Optional[pd.DataFrame] = None
 _tmdb_df: Optional[pd.DataFrame] = None
 _ratings_df: Optional[pd.DataFrame] = None
 _user_profiles_cache: dict[int, dict] = {}
+
+_home_cache: dict[int, tuple[float, dict]] = {}
 
 _ready = False
 _status = "initializing"
@@ -517,6 +520,80 @@ def _require_ready():
 @app.get("/api/health")
 def health():
     return {"ready": _ready, "status": _status}
+
+
+@app.get("/api/home")
+def home(user_id: int = 1):
+    _require_ready()
+
+    cached = _home_cache.get(user_id)
+    if cached and (time.time() - cached[0]) < 300:
+        return cached[1]
+
+    rows = [
+        {
+            "id": "hybrid-picks",
+            "title": "Hybrid Picks For You",
+            "subtitle": "Fusion ranking across collaborative, session, and knowledge-graph signals",
+            "query": None,
+        },
+        {
+            "id": "hybrid-sci-fi",
+            "title": "Hybrid Sci-Fi Picks",
+            "subtitle": "Fusion model boosted by a science-fiction query",
+            "query": "science fiction space future artificial intelligence dystopia",
+        },
+        {
+            "id": "hybrid-thrillers",
+            "title": "Hybrid Thriller Picks",
+            "subtitle": "Fusion model boosted by suspense, crime, and psychological themes",
+            "query": "psychological thriller crime suspense mystery dark",
+        },
+        {
+            "id": "hybrid-drama",
+            "title": "Hybrid Drama Picks",
+            "subtitle": "Fusion model boosted by drama, emotion, and character-driven storytelling",
+            "query": "drama emotional character relationships award-winning",
+        },
+        {
+            "id": "hybrid-classics",
+            "title": "Hybrid Classics",
+            "subtitle": "Fusion model boosted by timeless, critically acclaimed cinema",
+            "query": "classic masterpiece iconic cinema all-time great",
+        },
+        {
+            "id": "hybrid-trending",
+            "title": "Hybrid Trending",
+            "subtitle": "Fusion model over popular and active taste signals",
+            "query": "popular trending widely loved recent favorites",
+        },
+    ]
+
+    hero = _recommender.recommend(user_id=user_id, N=5)["recommendations"]
+
+    out_rows = []
+    for row in rows:
+        if row["query"]:
+            recs = _recommender.recommend(user_id=user_id, N=10, query=row["query"])["recommendations"]
+        else:
+            recs = _recommender.recommend(user_id=user_id, N=10)["recommendations"]
+
+        out_rows.append(
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "subtitle": row["subtitle"],
+                "movies": [_to_movie(r) for r in recs],
+            }
+        )
+
+    data = {
+        "heroMovies": [_to_movie(r) for r in hero],
+        "rows": out_rows,
+    }
+
+    _home_cache[user_id] = (time.time(), data)
+    return data
 
 
 @app.get("/api/recommendations")

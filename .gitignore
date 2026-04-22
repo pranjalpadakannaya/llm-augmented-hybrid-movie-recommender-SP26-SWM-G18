@@ -220,3 +220,16 @@ marimo/_lsp/
 __marimo__/
 
 code_dump.txt
+
+# Model artifacts
+data/artifacts/
+
+# Optional: ignore all generated data
+# data/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual env
+.venv/
