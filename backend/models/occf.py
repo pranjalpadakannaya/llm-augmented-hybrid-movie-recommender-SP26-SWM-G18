@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -107,6 +108,9 @@ class OCCFModel:
                     )
                 )
 
+    def _default_artifact_path(self) -> Path:
+        return self._repo_root() / "data" / "processed" / "model_artifacts" / "occf.pkl"
+
     def train(self) -> None:
         if self.user_item_matrix is None:
             raise RuntimeError("Call load_data() before train().")
@@ -114,6 +118,39 @@ class OCCFModel:
         print("Training OCCF model...")
         self.model.fit(self.user_item_matrix)
         print("Training complete.")
+
+    def save_artifact(self, artifact_path: str | Path | None = None) -> Path:
+        artifact_path = Path(artifact_path) if artifact_path else self._default_artifact_path()
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "model": self.model,
+            "user_item_matrix": self.user_item_matrix,
+            "user_map": self.user_map,
+            "item_map": self.item_map,
+            "user_inv_map": self.user_inv_map,
+            "item_inv_map": self.item_inv_map,
+            "movie_titles": self.movie_titles,
+        }
+        with open(artifact_path, "wb") as f:
+            pickle.dump(payload, f)
+        return artifact_path
+
+    def load_artifact(self, artifact_path: str | Path | None = None) -> None:
+        artifact_path = Path(artifact_path) if artifact_path else self._default_artifact_path()
+        if not artifact_path.exists():
+            raise FileNotFoundError(f"OCCF artifact not found: {artifact_path}")
+
+        with open(artifact_path, "rb") as f:
+            payload = pickle.load(f)
+
+        self.model = payload["model"]
+        self.user_item_matrix = payload["user_item_matrix"]
+        self.user_map = payload["user_map"]
+        self.item_map = payload["item_map"]
+        self.user_inv_map = payload["user_inv_map"]
+        self.item_inv_map = payload["item_inv_map"]
+        self.movie_titles = payload["movie_titles"]
 
     def recommend(self, user_id: int, N: int = 10) -> list[dict]:
         if user_id not in self.user_inv_map:

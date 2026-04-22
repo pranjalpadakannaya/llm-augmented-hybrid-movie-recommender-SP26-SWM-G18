@@ -41,16 +41,44 @@ class HybridRecommender:
     def _ratings_path(self) -> Path:
         return self._repo_root() / "data" / "processed" / "ratings.parquet"
 
-    def load_models(self) -> None:
-        self.occf.load_data()
-        self.occf.train()
+    def _artifact_dir(self) -> Path:
+        return self._repo_root() / "data" / "processed" / "model_artifacts"
 
-        self.gru.load_data()
-        self.gru.train()
+    def _artifact_is_fresh(self, artifact_path: Path, source_paths: list[Path]) -> bool:
+        if not artifact_path.exists():
+            return False
+
+        artifact_mtime = artifact_path.stat().st_mtime
+        for path in source_paths:
+            if path.exists() and path.stat().st_mtime > artifact_mtime:
+                return False
+        return True
+
+    def load_models(self) -> None:
+        ratings_path = self._ratings_path()
+        movies_path = self.occf._default_movies_path()
+        sessions_path = self.gru._default_sessions_path()
+        occf_artifact = self.occf._default_artifact_path()
+        gru_artifact = self.gru._default_artifact_path()
+
+        if self._artifact_is_fresh(occf_artifact, [ratings_path, movies_path or ratings_path]):
+            print(f"Loading OCCF artifact from {occf_artifact} ...")
+            self.occf.load_artifact(occf_artifact)
+        else:
+            self.occf.load_data(ratings_path=ratings_path, movies_path=movies_path)
+            self.occf.train()
+            self.occf.save_artifact(occf_artifact)
+
+        if self._artifact_is_fresh(gru_artifact, [sessions_path, movies_path or sessions_path]):
+            print(f"Loading GRU4Rec artifact from {gru_artifact} ...")
+            self.gru.load_artifact(gru_artifact)
+        else:
+            self.gru.load_data(sessions_path=sessions_path, movies_path=movies_path)
+            self.gru.train()
+            self.gru.save_artifact(gru_artifact)
 
         self.kg.load_data()
 
-        ratings_path = self._ratings_path()
         if ratings_path.exists():
             self.ratings_df = pd.read_parquet(ratings_path)
 
