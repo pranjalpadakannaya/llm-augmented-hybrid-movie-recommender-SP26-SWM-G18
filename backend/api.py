@@ -64,8 +64,9 @@ _movies_df: Optional[pd.DataFrame] = None
 _links_df: Optional[pd.DataFrame] = None
 _tmdb_df: Optional[pd.DataFrame] = None
 _ratings_df: Optional[pd.DataFrame] = None
-_user_profiles_cache: dict[int, dict] = {}
 
+_user_profiles_cache: dict[int, dict] = {}
+_user_cards_cache: dict[int, dict] = {}
 _home_cache: dict[int, tuple[float, dict]] = {}
 
 _ready = False
@@ -432,6 +433,42 @@ def _build_profile(user_id: int, recent_n: int = 6, top_n: int = 5) -> dict:
     }
 
 
+def _user_card(user_id: int) -> dict:
+    ratings_df = (
+        _recommender.ratings_df
+        if _recommender is not None and _recommender.ratings_df is not None
+        else _ratings_df
+    )
+    if ratings_df is None:
+        raise HTTPException(503, "Ratings not loaded")
+
+    user_ratings = ratings_df[ratings_df["userId"] == user_id]
+    if user_ratings.empty:
+        raise HTTPException(404, f"Unknown user: {user_id}")
+
+    display_name = f"User {user_id}"
+
+    favorite_genres: list[dict] = []
+    if _movies_df is not None:
+        user_movies = user_ratings.merge(
+            _movies_df[["movieId", "genres"]],
+            on="movieId",
+            how="left",
+        )
+        favorite_genres = _profile_genres(user_movies)
+
+    history_summary = favorite_genres[0]["genre"] if favorite_genres else ""
+
+    return {
+        "userId": user_id,
+        "displayName": display_name,
+        "initials": _initials(display_name),
+        "avatarColor": _avatar_color(user_id),
+        "historySummary": history_summary,
+        "favoriteGenres": favorite_genres[:2],
+    }
+
+
 def _normalize(recs: list[dict]) -> list[dict]:
     if not recs:
         return recs
@@ -447,7 +484,16 @@ def _normalize(recs: list[dict]) -> list[dict]:
 def _wrap_model(recs: list[dict], model_name: str, n: int) -> list[dict]:
     normed = _normalize(recs[:n])
     return [
-        {**r, "sources": [{"model": model_name, "score": r["score"], "normalized": r.get("_norm", 0)}]}
+        {
+            **r,
+            "sources": [
+                {
+                    "model": model_name,
+                    "score": r["score"],
+                    "normalized": r.get("_norm", 0),
+                }
+            ],
+        }
         for r in normed
     ]
 
@@ -460,10 +506,11 @@ def _load_dataframe(path: Path) -> Optional[pd.DataFrame]:
 
 def _load() -> None:
     global _recommender, _movies_df, _links_df, _tmdb_df, _ratings_df
-    global _user_profiles_cache, _ready, _status
+    global _user_profiles_cache, _user_cards_cache, _ready, _status
 
     try:
         _user_profiles_cache = {}
+        _user_cards_cache = {}
         _status = "loading metadata"
 
         _movies_df = _load_dataframe(DATA_DIR / "movies.parquet")
@@ -574,7 +621,9 @@ def home(user_id: int = 1):
     out_rows = []
     for row in rows:
         if row["query"]:
-            recs = _recommender.recommend(user_id=user_id, N=10, query=row["query"])["recommendations"]
+            recs = _recommender.recommend(
+                user_id=user_id, N=10, query=row["query"]
+            )["recommendations"]
         else:
             recs = _recommender.recommend(user_id=user_id, N=10)["recommendations"]
 
@@ -704,39 +753,15 @@ def users(limit: int = 8):
         raise HTTPException(503, "Ratings not loaded")
 
     counts = ratings_df.groupby("userId").size().sort_values(ascending=False)
-    selected_ids: list[int] = []
-    genre_seen: set[str] = set()
-
-    for user_id in counts.index.astype(int).tolist():
-        try:
-            profile_data = _user_profiles_cache.get(user_id)
-            if profile_data is None:
-                profile_data = _build_profile(user_id=user_id, recent_n=3, top_n=3)
-                _user_profiles_cache[user_id] = profile_data
-        except HTTPException:
-            continue
-
-        favorite = profile_data.get("favoriteGenres", [])
-        primary = favorite[0]["genre"] if favorite else "Unknown"
-        if primary not in genre_seen or len(selected_ids) < max(limit // 2, 1):
-            selected_ids.append(user_id)
-            genre_seen.add(primary)
-        if len(selected_ids) >= limit:
-            break
+    user_ids = counts.index.astype(int).tolist()[:limit]
 
     results = []
-    for user_id in selected_ids[:limit]:
-        profile_data = _user_profiles_cache[user_id]
-        results.append(
-            {
-                "userId": profile_data["userId"],
-                "displayName": profile_data["displayName"],
-                "initials": profile_data["initials"],
-                "avatarColor": profile_data["avatarColor"],
-                "historySummary": profile_data["historySummary"],
-                "favoriteGenres": profile_data["favoriteGenres"][:2],
-            }
-        )
+    for user_id in user_ids:
+        cached = _user_cards_cache.get(user_id)
+        if cached is None:
+            cached = _user_card(user_id)
+            _user_cards_cache[user_id] = cached
+        results.append(cached)
 
     return {"users": results}
 
@@ -812,3 +837,9 @@ def search(query: str, user_id: int = 1, n: int = 20):
         "parsedIntent": intent,
         "movies": movies,
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
