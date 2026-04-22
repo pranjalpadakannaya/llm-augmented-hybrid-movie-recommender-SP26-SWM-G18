@@ -7,8 +7,35 @@ import Home from './pages/Home';
 import Search from './pages/Search';
 import MovieDetail from './pages/MovieDetail';
 import Profile from './pages/Profile';
-import { fetchUsers } from './api/client';
+import { fetchProfile } from './api/client';
 import { UserOption } from './types';
+
+const DEMO_USERS: UserOption[] = [
+  {
+    userId: 41635,
+    displayName: 'User 41635',
+    initials: 'U4',
+    avatarColor: '#8B5CF6',
+    historySummary: 'Leans toward action, adventure, and sci-fi with some 80s comedy.',
+    favoriteGenres: [],
+  },
+  {
+    userId: 10311,
+    displayName: 'User 10311',
+    initials: 'U1',
+    avatarColor: '#A855F7',
+    historySummary: 'Leans toward comedy, animation, and family-friendly titles.',
+    favoriteGenres: [],
+  },
+  {
+    userId: 15769,
+    displayName: 'User 15769',
+    initials: 'U1',
+    avatarColor: '#F59E0B',
+    historySummary: 'Leans toward drama, romance, and psychologically heavier films.',
+    favoriteGenres: [],
+  },
+];
 
 function AnimatedRoutes({ userId }: { userId: number }) {
   const location = useLocation();
@@ -25,53 +52,39 @@ function AnimatedRoutes({ userId }: { userId: number }) {
 }
 
 export default function App() {
-  const [users, setUsers] = useState<UserOption[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState(1);
+  const [users, setUsers] = useState<UserOption[]>(DEMO_USERS);
+  const [selectedUserId, setSelectedUserId] = useState(DEMO_USERS[0].userId);
   const [usersLoading, setUsersLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    let pollId: ReturnType<typeof setInterval> | null = null;
+    setUsers(DEMO_USERS);
+    setUsersLoading(true);
 
-    async function loadUsers() {
-      try {
-        const data = await fetchUsers();
-        if (cancelled) return false;
-        if (data.length > 0) {
-          setUsers(data);
-          setSelectedUserId((current) =>
-            data.some((user) => user.userId === current) ? current : data[0].userId
-          );
-          setUsersLoading(false);
-          return true;
-        }
-      } catch {
-        // keep polling until backend becomes ready
-      }
-      if (!cancelled) {
-        setUsers([]);
-      }
-      return false;
-    }
-
-    async function initUsers() {
-      const loaded = await loadUsers();
-      if (loaded || cancelled) return;
-
-      pollId = setInterval(async () => {
-        const ok = await loadUsers();
-        if (ok && pollId) {
-          clearInterval(pollId);
-          pollId = null;
-        }
-      }, 4000);
-    }
-
-    initUsers();
+    Promise.allSettled(
+      DEMO_USERS.map(async (user) => {
+        const profile = await fetchProfile(user.userId);
+        return {
+          userId: profile.userId,
+          displayName: profile.displayName,
+          initials: profile.initials,
+          avatarColor: profile.avatarColor,
+          historySummary: profile.historySummary || user.historySummary,
+          favoriteGenres: profile.favoriteGenres,
+        } satisfies UserOption;
+      })
+    ).then((results) => {
+      if (cancelled) return;
+      setUsers(
+        results.map((result, index) =>
+          result.status === 'fulfilled' ? result.value : DEMO_USERS[index]
+        )
+      );
+      setUsersLoading(false);
+    });
 
     return () => {
       cancelled = true;
-      if (pollId) clearInterval(pollId);
     };
   }, []);
 
