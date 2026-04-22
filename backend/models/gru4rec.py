@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 
 class SessionDataset(Dataset):
@@ -118,6 +118,70 @@ class GRU4RecModel:
                 return path
         return None
 
+    def _artifact_dir(self) -> Path:
+        return self._repo_root() / "data" / "artifacts" / "gru4rec"
+
+    def save_artifacts(self, dir_path: str | Path | None = None) -> None:
+        if self.model is None:
+            raise RuntimeError("Nothing to save. Call load_data() and train() first.")
+
+        out_dir = Path(dir_path) if dir_path else self._artifact_dir()
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        torch.save(
+            {
+                "model_state": self.model.state_dict(),
+                "item2idx": self.item2idx,
+                "idx2item": self.idx2item,
+                "movie_titles": self.movie_titles,
+                "user_sessions": self.user_sessions,
+                "embed_dim": self.embed_dim,
+                "hidden_dim": self.hidden_dim,
+                "batch_size": self.batch_size,
+                "lr": self.lr,
+                "epochs": self.epochs,
+                "max_seq_len": self.max_seq_len,
+                "gap_threshold_seconds": self.gap_threshold_seconds,
+            },
+            out_dir / "gru4rec.pt",
+        )
+
+    def load_artifacts(self, dir_path: str | Path | None = None) -> bool:
+        out_dir = Path(dir_path) if dir_path else self._artifact_dir()
+        path = out_dir / "gru4rec.pt"
+        if not path.exists():
+            return False
+
+        ckpt = torch.load(path, map_location=self.device)
+
+        self.item2idx = ckpt.get("item2idx", {})
+        self.idx2item = ckpt.get("idx2item", {})
+        self.movie_titles = ckpt.get("movie_titles", {})
+        self.user_sessions = ckpt.get("user_sessions", {})
+        self.embed_dim = ckpt.get("embed_dim", self.embed_dim)
+        self.hidden_dim = ckpt.get("hidden_dim", self.hidden_dim)
+        self.batch_size = ckpt.get("batch_size", self.batch_size)
+        self.lr = ckpt.get("lr", self.lr)
+        self.epochs = ckpt.get("epochs", self.epochs)
+        self.max_seq_len = ckpt.get("max_seq_len", self.max_seq_len)
+        self.gap_threshold_seconds = ckpt.get(
+            "gap_threshold_seconds", self.gap_threshold_seconds
+        )
+
+        num_items = len(self.item2idx) + 1
+        self.model = GRU4RecNet(
+            num_items=num_items,
+            embed_dim=self.embed_dim,
+            hidden_dim=self.hidden_dim,
+        ).to(self.device)
+
+        model_state = ckpt.get("model_state")
+        if model_state is not None:
+            self.model.load_state_dict(model_state)
+
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        return True
+
     def _load_movies(self, movies_path: Optional[Path]):
         self.movie_titles = {}
         if movies_path is None or not movies_path.exists():
@@ -169,7 +233,7 @@ class GRU4RecModel:
         users = []
         end_times = []
 
-        for session_key, g in grouped:
+        for _, g in grouped:
             seq = g["movieId"].tolist()
             if len(seq) < 2:
                 continue
@@ -177,18 +241,14 @@ class GRU4RecModel:
             users.append(int(g["userId"].iloc[0]))
             end_times.append(int(g["timestamp"].max()))
 
-        # Build item vocabulary
         all_items = sorted({item for seq in sessions for item in seq})
         self.item2idx = {item_id: idx + 1 for idx, item_id in enumerate(all_items)}
         self.idx2item = {idx: item_id for item_id, idx in self.item2idx.items()}
 
-        # Keep per-user session history for inference
         self.user_sessions = {}
         for uid, seq in zip(users, sessions):
             self.user_sessions.setdefault(uid, []).append(seq)
 
-        # Convert each session into one training example:
-        # input = all but last item, target = last item
         samples = []
         for seq in sessions:
             encoded = [self.item2idx[i] for i in seq if i in self.item2idx]
@@ -197,7 +257,6 @@ class GRU4RecModel:
             encoded = encoded[-self.max_seq_len :]
             samples.append((encoded[:-1], encoded[-1]))
 
-        # Chronological split by session end time
         order = np.argsort(np.array(end_times))
         samples_sorted = [samples[i] for i in order if i < len(samples)]
 
@@ -232,7 +291,6 @@ class GRU4RecModel:
 
         df = self._build_sessions(df)
         self._load_movies(movies_path)
-
         self._build_samples(df)
 
         num_items = len(self.item2idx) + 1  # 0 is PAD
@@ -306,7 +364,6 @@ class GRU4RecModel:
         self.model.eval()
         logits = self.model(x, lengths).squeeze(0)
 
-        # Exclude PAD and already seen items
         seen = set(encoded)
         for item_idx in seen:
             logits[item_idx] = -1e9
@@ -335,7 +392,6 @@ class GRU4RecModel:
         if not sessions:
             return []
 
-        # Use the most recent session for inference
         history = sessions[-1]
         return self.recommend_from_history(history, N=N)
 

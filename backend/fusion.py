@@ -22,6 +22,7 @@ BASE_WEIGHTS: Dict[str, float] = {
 }
 
 CANDIDATE_MULTIPLIER: int = 3
+ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "data" / "artifacts"
 
 
 class HybridRecommender:
@@ -42,11 +43,18 @@ class HybridRecommender:
         return self._repo_root() / "data" / "processed" / "ratings.parquet"
 
     def load_models(self) -> None:
-        self.occf.load_data()
-        self.occf.train()
+        occf_ok = self.occf.load_artifacts(ARTIFACTS_DIR / "occf")
+        gru_ok = self.gru.load_artifacts(ARTIFACTS_DIR / "gru4rec")
 
-        self.gru.load_data()
-        self.gru.train()
+        if not occf_ok:
+            self.occf.load_data()
+            self.occf.train()
+            self.occf.save_artifacts(ARTIFACTS_DIR / "occf")
+
+        if not gru_ok:
+            self.gru.load_data()
+            self.gru.train()
+            self.gru.save_artifacts(ARTIFACTS_DIR / "gru4rec")
 
         self.kg.load_data()
 
@@ -208,7 +216,6 @@ class HybridRecommender:
             "recommendations": fused,
         }
 
-
     def tune_weights(
         self,
         ratings_df: pd.DataFrame,
@@ -226,7 +233,6 @@ class HybridRecommender:
         except ImportError:
             from backend.evaluation.metrics import ndcg_at_k
 
-        # Build ground truth from last 20% of each validation user's ratings
         test_map: dict[int, set[int]] = {}
         for uid in val_users:
             user_ratings = ratings_df[ratings_df["userId"] == uid]
@@ -241,7 +247,6 @@ class HybridRecommender:
         if not test_map:
             return self.base_weights.copy()
 
-        # Pre-fetch candidates for all val users
         pool = k * 3
         occf_cache: dict[int, list[dict]] = {}
         gru_cache: dict[int, list[dict]] = {}

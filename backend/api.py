@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
 import hashlib
 import re
 import threading
-from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 except ImportError:
     pass
@@ -29,6 +30,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data" / "processed"
 TMDB_POSTER_BASE = "https://image.tmdb.org/t/p/w500"
 TMDB_BACKDROP_BASE = "https://image.tmdb.org/t/p/w1280"
+
 GENRE_PALETTE = [
     "#4FC3F7",
     "#EF5350",
@@ -37,6 +39,7 @@ GENRE_PALETTE = [
     "#CE93D8",
     "#FF8A65",
 ]
+
 MODEL_META = {
     "OCCF": {
         "label": "Collaborative Filtering",
@@ -61,6 +64,7 @@ _links_df: Optional[pd.DataFrame] = None
 _tmdb_df: Optional[pd.DataFrame] = None
 _ratings_df: Optional[pd.DataFrame] = None
 _user_profiles_cache: dict[int, dict] = {}
+
 _ready = False
 _status = "initializing"
 
@@ -86,7 +90,11 @@ def _parse_title(raw: str) -> tuple[str, int]:
 
 def _coerce_genres(value) -> list[str]:
     if isinstance(value, list):
-        return [str(v).strip() for v in value if str(v).strip() and str(v).strip() != "(no genres listed)"]
+        return [
+            str(v).strip()
+            for v in value
+            if str(v).strip() and str(v).strip() != "(no genres listed)"
+        ]
 
     if value is None:
         return []
@@ -163,10 +171,17 @@ def _meta(movie_id: int) -> dict:
                 genres = _coerce_genres(r.get("genre_names", ""))
 
     return {
-        "title": title, "year": year, "genres": genres, "tmdb_id": tmdb_id,
-        "overview": overview, "director": director, "cast": cast,
-        "runtime": runtime, "rating": rating,
-        "poster_path": poster_path, "backdrop_path": backdrop_path,
+        "title": title,
+        "year": year,
+        "genres": genres,
+        "tmdb_id": tmdb_id,
+        "overview": overview,
+        "director": director,
+        "cast": cast,
+        "runtime": runtime,
+        "rating": rating,
+        "poster_path": poster_path,
+        "backdrop_path": backdrop_path,
         "maturity_rating": maturity_rating,
     }
 
@@ -197,10 +212,10 @@ def _build_sources(raw_sources: list[dict], because: list[str]) -> list[dict]:
 def _to_movie(rec: dict, explanation: str = "") -> dict:
     mid = int(rec["movieId"])
     m = _meta(mid)
-    grad = _gradient(mid)
     sources = _build_sources(rec.get("sources", []), rec.get("because", []))
     if explanation and sources:
         sources[0]["reason"] = explanation
+
     return {
         "id": mid,
         "movieLensId": mid,
@@ -210,7 +225,7 @@ def _to_movie(rec: dict, explanation: str = "") -> dict:
         "runtime": m["runtime"],
         "genres": m["genres"] or ["Unknown"],
         "overview": m["overview"],
-        "gradient": list(grad),
+        "gradient": list(_gradient(mid)),
         "accentColor": _accent(mid),
         "director": m["director"],
         "cast": m["cast"],
@@ -296,7 +311,11 @@ def _history_summary(favorite_genres: list[dict], top_director: str) -> str:
 
 
 def _build_profile(user_id: int, recent_n: int = 6, top_n: int = 5) -> dict:
-    ratings_df = _recommender.ratings_df if _recommender is not None and _recommender.ratings_df is not None else _ratings_df
+    ratings_df = (
+        _recommender.ratings_df
+        if _recommender is not None and _recommender.ratings_df is not None
+        else _ratings_df
+    )
     if ratings_df is None:
         raise HTTPException(503, "Ratings not loaded")
 
@@ -310,21 +329,46 @@ def _build_profile(user_id: int, recent_n: int = 6, top_n: int = 5) -> dict:
     deduped = user_ratings.drop_duplicates(subset=["movieId"], keep="last").copy()
     total_watched = int(deduped["movieId"].nunique())
     avg_rating = round(float(user_ratings["rating"].mean()), 1)
-    recent_activity = int((user_ratings["timestamp"] >= (user_ratings["timestamp"].max() - 30 * 24 * 60 * 60)).sum()) if "timestamp" in user_ratings.columns else len(user_ratings)
+    recent_activity = (
+        int(
+            (
+                user_ratings["timestamp"]
+                >= (user_ratings["timestamp"].max() - 30 * 24 * 60 * 60)
+            ).sum()
+        )
+        if "timestamp" in user_ratings.columns
+        else len(user_ratings)
+    )
 
     if _movies_df is not None:
-        user_movies = deduped.merge(_movies_df[["movieId", "title", "year", "genres"]], on="movieId", how="left")
+        user_movies = deduped.merge(
+            _movies_df[["movieId", "title", "year", "genres"]],
+            on="movieId",
+            how="left",
+        )
     else:
         user_movies = deduped.copy()
         user_movies["year"] = 0
         user_movies["genres"] = [[] for _ in range(len(user_movies))]
 
-    recent_rows = deduped.sort_values("timestamp", ascending=False).head(recent_n) if "timestamp" in deduped.columns else deduped.tail(recent_n)
-    top_rows = deduped.sort_values(["rating", "timestamp"], ascending=[False, False]).head(top_n) if "timestamp" in deduped.columns else deduped.sort_values("rating", ascending=False).head(top_n)
+    recent_rows = (
+        deduped.sort_values("timestamp", ascending=False).head(recent_n)
+        if "timestamp" in deduped.columns
+        else deduped.tail(recent_n)
+    )
+    top_rows = (
+        deduped.sort_values(["rating", "timestamp"], ascending=[False, False]).head(
+            top_n
+        )
+        if "timestamp" in deduped.columns
+        else deduped.sort_values("rating", ascending=False).head(top_n)
+    )
 
     favorite_genres = _profile_genres(user_movies)
     top_director = _profile_top_director(deduped["movieId"].astype(int).tolist())
-    preferred_era = _preferred_era([int(y) for y in user_movies.get("year", pd.Series(dtype=int)).fillna(0).tolist()])
+    preferred_era = _preferred_era(
+        [int(y) for y in user_movies.get("year", pd.Series(dtype=int)).fillna(0).tolist()]
+    )
     favorite_theme = favorite_genres[0]["genre"] if favorite_genres else "Unknown"
 
     recent_movies = [
@@ -339,7 +383,11 @@ def _build_profile(user_id: int, recent_n: int = 6, top_n: int = 5) -> dict:
     display_name = f"User {user_id}"
     contributions = []
     weights = _recommender.base_weights if _recommender is not None else MODEL_META.keys()
-    iterable = weights.items() if isinstance(weights, dict) else [(model, {"OCCF": 0.4, "GRU4Rec": 0.3, "KnowledgeGraph": 0.3}[model]) for model in weights]
+    iterable = (
+        weights.items()
+        if isinstance(weights, dict)
+        else [(model, {"OCCF": 0.4, "GRU4Rec": 0.3, "KnowledgeGraph": 0.3}[model]) for model in weights]
+    )
     for model, weight in iterable:
         meta = MODEL_META.get(model)
         if not meta:
@@ -362,7 +410,9 @@ def _build_profile(user_id: int, recent_n: int = 6, top_n: int = 5) -> dict:
         "avatarColor": _avatar_color(user_id),
         "favoriteGenres": favorite_genres,
         "totalWatched": total_watched,
-        "memberSince": _format_member_since(float(user_ratings["timestamp"].min())) if "timestamp" in user_ratings.columns else "Unknown",
+        "memberSince": _format_member_since(float(user_ratings["timestamp"].min()))
+        if "timestamp" in user_ratings.columns
+        else "Unknown",
         "avgRating": avg_rating,
         "activeModels": len(contributions),
         "recentActivity": recent_activity,
@@ -385,7 +435,10 @@ def _normalize(recs: list[dict]) -> list[dict]:
     scores = [float(r["score"]) for r in recs]
     mn, mx = min(scores), max(scores)
     spread = mx - mn
-    return [{**r, "_norm": (float(r["score"]) - mn) / spread if spread > 1e-9 else 1.0} for r in recs]
+    return [
+        {**r, "_norm": (float(r["score"]) - mn) / spread if spread > 1e-9 else 1.0}
+        for r in recs
+    ]
 
 
 def _wrap_model(recs: list[dict], model_name: str, n: int) -> list[dict]:
@@ -396,23 +449,44 @@ def _wrap_model(recs: list[dict], model_name: str, n: int) -> list[dict]:
     ]
 
 
+def _load_dataframe(path: Path) -> Optional[pd.DataFrame]:
+    if not path.exists():
+        return None
+    return pd.read_parquet(path)
+
+
 def _load() -> None:
-    global _recommender, _movies_df, _links_df, _tmdb_df, _ratings_df, _user_profiles_cache, _ready, _status
+    global _recommender, _movies_df, _links_df, _tmdb_df, _ratings_df
+    global _user_profiles_cache, _ready, _status
+
     try:
         _user_profiles_cache = {}
         _status = "loading metadata"
-        if (DATA_DIR / "movies.parquet").exists():
-            _movies_df = pd.read_parquet(DATA_DIR / "movies.parquet")
-        if (DATA_DIR / "links.parquet").exists():
-            _links_df = pd.read_parquet(DATA_DIR / "links.parquet")
-        if (DATA_DIR / "tmdb_metadata.parquet").exists():
-            _tmdb_df = pd.read_parquet(DATA_DIR / "tmdb_metadata.parquet")
-        if (DATA_DIR / "ratings.parquet").exists():
-            _ratings_df = pd.read_parquet(DATA_DIR / "ratings.parquet")
 
-        _status = "training models (this takes a few minutes on first run)"
+        _movies_df = _load_dataframe(DATA_DIR / "movies.parquet")
+        _links_df = _load_dataframe(DATA_DIR / "links.parquet")
+        _tmdb_df = _load_dataframe(DATA_DIR / "tmdb_metadata.parquet")
+        _ratings_df = _load_dataframe(DATA_DIR / "ratings.parquet")
+
+        _status = "loading recommendation models"
         _recommender = HybridRecommender()
-        _recommender.load_models()
+
+        loaded_from_cache = False
+        if hasattr(_recommender, "load_artifacts"):
+            try:
+                loaded_from_cache = bool(_recommender.load_artifacts())
+            except Exception:
+                loaded_from_cache = False
+
+        if not loaded_from_cache:
+            _status = "training models (first run only)"
+            _recommender.load_models()
+
+            if hasattr(_recommender, "save_artifacts"):
+                try:
+                    _recommender.save_artifacts()
+                except Exception:
+                    pass
 
         _ready = True
         _status = "ready"
@@ -489,11 +563,19 @@ def recommendations(
         raw = []
         for movie_id, count in counts.items():
             norm_score = float(count) / mx
-            raw.append({
-                "movieId": movie_id,
-                "score": norm_score,
-                "sources": [{"model": "Trending", "score": norm_score, "normalized": norm_score}],
-            })
+            raw.append(
+                {
+                    "movieId": movie_id,
+                    "score": norm_score,
+                    "sources": [
+                        {
+                            "model": "Trending",
+                            "score": norm_score,
+                            "normalized": norm_score,
+                        }
+                    ],
+                }
+            )
     else:
         raise HTTPException(400, f"Unknown model: {model}")
 
@@ -504,7 +586,6 @@ def recommendations(
 def movie_detail(movie_id: int):
     _require_ready()
     m = _meta(movie_id)
-    grad = _gradient(movie_id)
     return {
         "id": movie_id,
         "movieLensId": movie_id,
@@ -514,7 +595,7 @@ def movie_detail(movie_id: int):
         "runtime": m["runtime"],
         "genres": m["genres"] or ["Unknown"],
         "overview": m["overview"],
-        "gradient": list(grad),
+        "gradient": list(_gradient(movie_id)),
         "accentColor": _accent(movie_id),
         "director": m["director"],
         "cast": m["cast"],
@@ -537,26 +618,28 @@ def profile(user_id: int = 1, recent_n: int = 6, top_n: int = 5):
 
 @app.get("/api/users")
 def users(limit: int = 8):
-    ratings_df = _recommender.ratings_df if _recommender is not None and _recommender.ratings_df is not None else _ratings_df
+    ratings_df = (
+        _recommender.ratings_df
+        if _recommender is not None and _recommender.ratings_df is not None
+        else _ratings_df
+    )
     if ratings_df is None:
         raise HTTPException(503, "Ratings not loaded")
 
-    counts = (
-        ratings_df.groupby("userId").size().sort_values(ascending=False)
-    )
+    counts = ratings_df.groupby("userId").size().sort_values(ascending=False)
     selected_ids: list[int] = []
     genre_seen: set[str] = set()
 
     for user_id in counts.index.astype(int).tolist():
         try:
-            profile = _user_profiles_cache.get(user_id)
-            if profile is None:
-                profile = _build_profile(user_id=user_id, recent_n=3, top_n=3)
-                _user_profiles_cache[user_id] = profile
+            profile_data = _user_profiles_cache.get(user_id)
+            if profile_data is None:
+                profile_data = _build_profile(user_id=user_id, recent_n=3, top_n=3)
+                _user_profiles_cache[user_id] = profile_data
         except HTTPException:
             continue
 
-        favorite = profile.get("favoriteGenres", [])
+        favorite = profile_data.get("favoriteGenres", [])
         primary = favorite[0]["genre"] if favorite else "Unknown"
         if primary not in genre_seen or len(selected_ids) < max(limit // 2, 1):
             selected_ids.append(user_id)
@@ -566,15 +649,15 @@ def users(limit: int = 8):
 
     results = []
     for user_id in selected_ids[:limit]:
-        profile = _user_profiles_cache[user_id]
+        profile_data = _user_profiles_cache[user_id]
         results.append(
             {
-                "userId": profile["userId"],
-                "displayName": profile["displayName"],
-                "initials": profile["initials"],
-                "avatarColor": profile["avatarColor"],
-                "historySummary": profile["historySummary"],
-                "favoriteGenres": profile["favoriteGenres"][:2],
+                "userId": profile_data["userId"],
+                "displayName": profile_data["displayName"],
+                "initials": profile_data["initials"],
+                "avatarColor": profile_data["avatarColor"],
+                "historySummary": profile_data["historySummary"],
+                "favoriteGenres": profile_data["favoriteGenres"][:2],
             }
         )
 
@@ -585,10 +668,8 @@ def users(limit: int = 8):
 def search(query: str, user_id: int = 1, n: int = 20):
     _require_ready()
 
-    # Parse query with LLM (graceful fallback if Ollama unavailable)
     intent = _llm.parse_query(query)
 
-    # Build effective search query from structured intent
     effective_query = query
     seed = intent.get("seed_movies", [])
     keywords = intent.get("keywords", [])
@@ -596,10 +677,8 @@ def search(query: str, user_id: int = 1, n: int = 20):
         parts = list(seed) + list(keywords) + intent.get("genres", [])
         effective_query = " ".join(parts) if parts else query
 
-    # Use KG for semantic search; boost with seed movies
     raw = _recommender.kg.recommend_from_query(effective_query, N=n * 2)
 
-    # If seed movies mentioned, also pull KG results for each seed title
     if seed and len(raw) < n:
         for title in seed[:2]:
             extra = _recommender.kg.recommend_from_query(title, N=10)
@@ -610,12 +689,17 @@ def search(query: str, user_id: int = 1, n: int = 20):
     movie_dicts = [
         {
             **r,
-            "sources": [{"model": "KnowledgeGraph", "score": r["score"], "normalized": r.get("_norm", 0)}],
+            "sources": [
+                {
+                    "model": "KnowledgeGraph",
+                    "score": r["score"],
+                    "normalized": r.get("_norm", 0),
+                }
+            ],
         }
         for r in normed
     ]
 
-    # Generate LLM explanations (no-op if Ollama unavailable)
     explanations = _llm.generate_explanations(
         movies=[
             {
@@ -636,7 +720,6 @@ def search(query: str, user_id: int = 1, n: int = 20):
         for r in movie_dicts
     ]
 
-    # Build human-readable interpretation text
     parts = []
     if intent.get("genres"):
         parts.append("genres: " + ", ".join(intent["genres"]))

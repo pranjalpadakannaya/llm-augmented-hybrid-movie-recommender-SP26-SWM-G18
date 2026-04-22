@@ -22,6 +22,18 @@ export interface SearchResponse {
   movies: Movie[];
 }
 
+export interface HomeRow {
+  id: string;
+  title: string;
+  subtitle: string;
+  movies: Movie[];
+}
+
+export interface HomeResponse {
+  heroMovies: Movie[];
+  rows: HomeRow[];
+}
+
 function toMovie(raw: Record<string, unknown>): Movie {
   return {
     id: raw.id as number,
@@ -131,4 +143,26 @@ export async function fetchUsers(limit = 8): Promise<UserOption[]> {
   if (!res.ok) throw new Error(`users ${res.status}`);
   const data = await res.json();
   return ((data.users || []) as Record<string, unknown>[]).map(toUserOption);
+}
+
+export async function fetchHome(userId = 1): Promise<HomeResponse> {
+  const p = new URLSearchParams({ user_id: String(userId) });
+  const res = await fetch(`${API}/home?${p}`);
+  if (!res.ok) throw new Error(`home ${res.status}`);
+  const data = await res.json();
+
+  return {
+    heroMovies: ((data.heroMovies || []) as Record<string, unknown>[]).map(toMovie),
+    rows: ((data.rows || []) as Array<{
+      id: string;
+      title: string;
+      subtitle: string;
+      movies: Record<string, unknown>[];
+    }>).map((row) => ({
+      id: row.id,
+      title: row.title,
+      subtitle: row.subtitle,
+      movies: (row.movies || []).map(toMovie),
+    })),
+  };
 }

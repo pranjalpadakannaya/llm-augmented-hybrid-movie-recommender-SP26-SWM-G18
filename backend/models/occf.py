@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
-from scipy.sparse import coo_matrix
 from implicit.als import AlternatingLeastSquares
+from scipy.sparse import coo_matrix, load_npz, save_npz
 
 
 class OCCFModel:
     def __init__(
         self, factors: int = 50, regularization: float = 0.01, iterations: int = 10
     ):
+        self.factors = factors
+        self.regularization = regularization
+        self.iterations = iterations
+
         self.model = AlternatingLeastSquares(
             factors=factors,
             regularization=regularization,
@@ -42,6 +48,65 @@ class OCCFModel:
                 return path
         return None
 
+    def _artifact_dir(self) -> Path:
+        return self._repo_root() / "data" / "artifacts" / "occf"
+
+    def save_artifacts(self, dir_path: str | Path | None = None) -> None:
+        if self.user_item_matrix is None:
+            raise RuntimeError("Nothing to save. Call load_data() and train() first.")
+
+        out_dir = Path(dir_path) if dir_path else self._artifact_dir()
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        save_npz(out_dir / "user_item_matrix.npz", self.user_item_matrix)
+        joblib.dump(
+            {
+                "factors": self.factors,
+                "regularization": self.regularization,
+                "iterations": self.iterations,
+                "user_map": self.user_map,
+                "item_map": self.item_map,
+                "user_inv_map": self.user_inv_map,
+                "item_inv_map": self.item_inv_map,
+                "movie_titles": self.movie_titles,
+                "model": self.model,
+            },
+            out_dir / "occf_meta.pkl",
+        )
+
+    def load_artifacts(self, dir_path: str | Path | None = None) -> bool:
+        out_dir = Path(dir_path) if dir_path else self._artifact_dir()
+        matrix_path = out_dir / "user_item_matrix.npz"
+        meta_path = out_dir / "occf_meta.pkl"
+
+        if not matrix_path.exists() or not meta_path.exists():
+            return False
+
+        self.user_item_matrix = load_npz(matrix_path)
+        meta = joblib.load(meta_path)
+
+        self.factors = meta.get("factors", self.factors)
+        self.regularization = meta.get("regularization", self.regularization)
+        self.iterations = meta.get("iterations", self.iterations)
+
+        self.user_map = meta.get("user_map", {})
+        self.item_map = meta.get("item_map", {})
+        self.user_inv_map = meta.get("user_inv_map", {})
+        self.item_inv_map = meta.get("item_inv_map", {})
+        self.movie_titles = meta.get("movie_titles", {})
+
+        loaded_model = meta.get("model")
+        if loaded_model is not None:
+            self.model = loaded_model
+        else:
+            self.model = AlternatingLeastSquares(
+                factors=self.factors,
+                regularization=self.regularization,
+                iterations=self.iterations,
+            )
+
+        return True
+
     def load_data(
         self,
         ratings_path: str | Path | None = None,
@@ -68,11 +133,9 @@ class OCCFModel:
                 "ratings.parquet must contain userId, movieId, and rating columns"
             )
 
-        # Implicit confidence weighting
         df = df.copy()
         df["confidence"] = 1.0 + df["rating"].astype(np.float32)
 
-        # Encode IDs
         user_cat = df["userId"].astype("category")
         item_cat = df["movieId"].astype("category")
 
@@ -84,14 +147,12 @@ class OCCFModel:
         self.user_inv_map = {v: k for k, v in self.user_map.items()}
         self.item_inv_map = {v: k for k, v in self.item_map.items()}
 
-        # IMPORTANT: use CSR for indexing + implicit ALS
         self.user_item_matrix = coo_matrix(
             (df["confidence"].to_numpy(dtype=np.float32), (user_codes, item_codes))
         ).tocsr()
 
         print("Data loaded. Matrix shape:", self.user_item_matrix.shape)
 
-        # Load movie titles for human-readable output
         self.movie_titles = {}
         if movies_path and movies_path.exists():
             if movies_path.suffix.lower() == ".parquet":
