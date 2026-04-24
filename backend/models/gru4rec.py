@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 
@@ -117,6 +116,9 @@ class GRU4RecModel:
             if path.exists():
                 return path
         return None
+
+    def _default_artifact_path(self) -> Path:
+        return self._repo_root() / "data" / "processed" / "model_artifacts" / "gru4rec.pt"
 
     def _load_movies(self, movies_path: Optional[Path]):
         self.movie_titles = {}
@@ -285,6 +287,64 @@ class GRU4RecModel:
             print(f"Epoch {epoch + 1}/{self.epochs} - loss: {avg_loss:.4f}")
 
         print("Training complete.")
+
+    def save_artifact(self, artifact_path: str | Path | None = None) -> Path:
+        if self.model is None:
+            raise RuntimeError("Model is not trained.")
+
+        artifact_path = Path(artifact_path) if artifact_path else self._default_artifact_path()
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+
+        torch.save(
+            {
+                "model_state_dict": self.model.state_dict(),
+                "embed_dim": self.embed_dim,
+                "hidden_dim": self.hidden_dim,
+                "batch_size": self.batch_size,
+                "lr": self.lr,
+                "epochs": self.epochs,
+                "max_seq_len": self.max_seq_len,
+                "gap_threshold_seconds": self.gap_threshold_seconds,
+                "movie_titles": self.movie_titles,
+                "item2idx": self.item2idx,
+                "idx2item": self.idx2item,
+                "user_sessions": self.user_sessions,
+                "train_samples": self.train_samples,
+                "val_samples": self.val_samples,
+            },
+            artifact_path,
+        )
+        return artifact_path
+
+    def load_artifact(self, artifact_path: str | Path | None = None) -> None:
+        artifact_path = Path(artifact_path) if artifact_path else self._default_artifact_path()
+        if not artifact_path.exists():
+            raise FileNotFoundError(f"GRU4Rec artifact not found: {artifact_path}")
+
+        payload = torch.load(artifact_path, map_location=self.device, weights_only=False)
+        self.embed_dim = int(payload["embed_dim"])
+        self.hidden_dim = int(payload["hidden_dim"])
+        self.batch_size = int(payload["batch_size"])
+        self.lr = float(payload["lr"])
+        self.epochs = int(payload["epochs"])
+        self.max_seq_len = int(payload["max_seq_len"])
+        self.gap_threshold_seconds = int(payload["gap_threshold_seconds"])
+        self.movie_titles = payload["movie_titles"]
+        self.item2idx = payload["item2idx"]
+        self.idx2item = payload["idx2item"]
+        self.user_sessions = payload["user_sessions"]
+        self.train_samples = payload["train_samples"]
+        self.val_samples = payload["val_samples"]
+
+        num_items = len(self.item2idx) + 1
+        self.model = GRU4RecNet(
+            num_items=num_items,
+            embed_dim=self.embed_dim,
+            hidden_dim=self.hidden_dim,
+        ).to(self.device)
+        self.model.load_state_dict(payload["model_state_dict"])
+        self.model.eval()
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
     @torch.no_grad()
     def recommend_from_history(
